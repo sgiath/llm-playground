@@ -40,6 +40,10 @@ config :play, PlayWeb.Endpoint,
     ]
   ]
 
+config :sgiath_auth,
+  callback_url: "http://localhost:4000/auth/callback",
+  logout_return_to: "http://localhost:4000/"
+
 # Enable dev routes for dashboard and mailbox
 config :play, dev_routes: true
 

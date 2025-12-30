@@ -1,21 +1,34 @@
 import Config
 
-# config/runtime.exs is executed for all environments, including
-# during releases. It is executed after compilation and before the
-# system starts, so it is typically used to load production configuration
-# and secrets from environment variables or elsewhere. Do not define
-# any compile-time configuration in here, as it won't be applied.
-# The block below contains prod specific runtime configuration.
+# WorkOS authentication
+workos_client_id =
+  System.get_env("WORKOS_CLIENT_ID") ||
+    raise """
+    environment variable WORKOS_CLIENT_ID is missing.
+    Get it from your WorkOS dashboard at https://dashboard.workos.com
+    """
 
-# ## Using releases
-#
-# If you use `mix release`, you need to explicitly enable the server
-# by passing the PHX_SERVER=true when you start it:
-#
-#     PHX_SERVER=true bin/play start
-#
-# Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
-# script that automatically sets the env var above.
+workos_secret_key =
+  System.get_env("WORKOS_SECRET_KEY") ||
+    raise """
+    environment variable WORKOS_SECRET_KEY is missing.
+    Get it from your WorkOS dashboard at https://dashboard.workos.com
+    """
+
+config :sgiath_auth,
+  workos_client_id: workos_client_id,
+  workos_secret_key: workos_secret_key
+
+# OpenRouter API configuration (used via LangChain's ChatOpenAI with custom endpoint)
+openrouter_api_key =
+  System.get_env("OPENROUTER_API_KEY") ||
+    raise """
+    environment variable OPENROUTER_API_KEY is missing.
+    Get it from your OpenRouter dashboard at https://openrouter.ai
+    """
+
+config :langchain, openai_key: openrouter_api_key
+
 if System.get_env("PHX_SERVER") do
   config :play, PlayWeb.Endpoint, server: true
 end
@@ -31,7 +44,6 @@ if config_env() == :prod do
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
   config :play, Play.Repo,
-    # ssl: true,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     # For machines with several cores, consider starting multiple pools of `pool_size`
@@ -66,6 +78,10 @@ if config_env() == :prod do
       port: port
     ],
     secret_key_base: secret_key_base
+
+  config :sgiath_auth,
+    callback_url: "https://#{host}/auth/callback",
+    logout_return_to: "https://#{host}/"
 
   # ## Configuring the mailer
   #

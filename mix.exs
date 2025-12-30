@@ -33,15 +33,27 @@ defmodule Play.MixProject do
 
   defp deps do
     [
+      {:sgiath_auth, github: "sgiath/auth"},
+
+      # Using fork with SSE comment fix for OpenRouter compatibility
+      # See: https://github.com/brainlid/langchain/issues/259
+      # See: https://github.com/joecorcoran/langchain/commit/2c765721dad65ac7b546c258dc3d75cba6f4fd3e
+      {:langchain, github: "joecorcoran/langchain"},
+
+      # phoenix
+      {:bandit, "~> 1.10"},
       {:phoenix, "~> 1.8"},
-      {:phoenix_ecto, "~> 4.7"},
-      {:ecto_sql, "~> 3.13"},
-      {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 4.3"},
       {:phoenix_live_reload, "~> 1.6", only: :dev},
       {:phoenix_live_view, "~> 1.1"},
-      {:lazy_html, ">= 0.1.0", only: :test},
       {:phoenix_live_dashboard, "~> 0.8"},
+
+      # database
+      {:ecto_sql, "~> 3.13"},
+      {:phoenix_ecto, "~> 4.7"},
+      {:postgrex, ">= 0.0.0"},
+
+      # css and js
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.4", runtime: Mix.env() == :dev},
       {:heroicons,
@@ -51,13 +63,19 @@ defmodule Play.MixProject do
        app: false,
        compile: false,
        depth: 1},
+
+      # other
       {:swoosh, "~> 1.20"},
       {:req, "~> 0.5"},
+      {:gettext, "~> 1.0"},
+
+      # deployment
       {:telemetry_metrics, "~> 1.1"},
       {:telemetry_poller, "~> 1.3"},
-      {:gettext, "~> 1.0"},
       {:dns_cluster, "~> 0.2"},
-      {:bandit, "~> 1.10"}
+
+      # testing
+      {:lazy_html, ">= 0.1.0", only: :test}
     ]
   end
 

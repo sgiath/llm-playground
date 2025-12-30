@@ -15,6 +15,13 @@ config :play, PlayWeb.Endpoint,
   pubsub_server: Play.PubSub,
   live_view: [signing_salt: "Bwi+HoZQ"]
 
+config :sgiath_auth,
+  organization_id: "org_01KDQGBGV0CQKH8JJR94TDYKKG",
+  profile_module: Play.UserProfile
+
+# JWKS uses Tesla so we need to set the adapter
+config :tesla, adapter: Tesla.Adapter.Mint
+
 # Configures the mailer
 #
 # By default it uses the "Local" adapter which stores the emails

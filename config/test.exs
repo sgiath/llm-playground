@@ -35,3 +35,7 @@ config :phoenix, :plug_init_mode, :runtime
 # Enable helpful, but potentially expensive runtime checks
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
+
+config :sgiath_auth,
+  callback_url: "http://localhost:4002/auth/callback",
+  logout_return_to: "http://localhost:4002/"

@@ -10,6 +10,7 @@ defmodule Play.Application do
       Play.Repo,
       {DNSCluster, query: Application.get_env(:play, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Play.PubSub},
+      SgiathAuth.Supervisor,
       PlayWeb.Endpoint
     ]
 
