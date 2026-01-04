@@ -311,15 +311,28 @@ defmodule Play.NodeExecutors do
   def execute("agent/stateful_agent", node, inputs, properties, context) do
     llm_config = Map.get(inputs, 0)
     system_override = Map.get(inputs, 1)
-    user_message = Map.get(inputs, 2, "")
+    user_message_input = Map.get(inputs, 2)
     tools = Map.get(inputs, 3, [])
+
+    # Extract content from message struct or use as-is if string
+    {user_message, user_message_content} =
+      case user_message_input do
+        %Message{} = msg ->
+          {msg, extract_message_content(msg)}
+
+        content when is_binary(content) ->
+          {nil, content}
+
+        _ ->
+          {nil, ""}
+      end
 
     system_prompt =
       system_override || Map.get(properties, "system_prompt", "You are a helpful assistant.")
 
     stream = Map.get(properties, "stream", true)
 
-    # Load existing conversation history from properties
+    # Load existing conversation history from properties (full serialized messages)
     conversation_history = Map.get(properties, "conversation_history", [])
 
     if is_nil(llm_config) do
@@ -346,33 +359,34 @@ defmodule Play.NodeExecutors do
           %{}
         end
 
-      # Build the chain with system prompt
+      # Build the chain
+      chain = LLMChain.new!(%{llm: llm_config})
+
+      # Add existing conversation history or start fresh with system prompt
       chain =
-        %{llm: llm_config}
-        |> LLMChain.new!()
-        |> LLMChain.add_message(Message.new_system!(system_prompt))
-
-      # Add existing conversation history
-      chain =
-        Enum.reduce(conversation_history, chain, fn msg, acc ->
-          case msg do
-            %{"role" => "user", "content" => content} ->
-              LLMChain.add_message(acc, Message.new_user!(content))
-
-            %{"role" => "assistant", "content" => content} ->
-              LLMChain.add_message(acc, Message.new_assistant!(content))
-
-            _ ->
-              acc
-          end
-        end)
-
-      # Add the new user message if provided
-      chain =
-        if user_message && user_message != "" do
-          LLMChain.add_message(chain, Message.new_user!(user_message))
+        if conversation_history == [] do
+          # Fresh conversation - add system prompt
+          LLMChain.add_message(chain, Message.new_system!(system_prompt))
         else
-          chain
+          # Restore from history - deserialize all messages
+          Enum.reduce(conversation_history, chain, fn msg, acc ->
+            LLMChain.add_message(acc, deserialize_message(msg))
+          end)
+        end
+
+      # Add the new user message if provided (either as Message struct or created from content)
+      chain =
+        cond do
+          user_message != nil ->
+            # Use the Message struct directly
+            LLMChain.add_message(chain, user_message)
+
+          user_message_content != "" ->
+            # Create a new message from the string content
+            LLMChain.add_message(chain, Message.new_user!(user_message_content))
+
+          true ->
+            chain
         end
 
       # Add tools if present
@@ -393,23 +407,11 @@ defmodule Play.NodeExecutors do
           last_message = updated_chain.last_message
           response_text = extract_message_content(last_message)
 
-          # Build updated conversation history
-          new_history =
-            conversation_history
-            |> then(fn history ->
-              if user_message && user_message != "" do
-                history ++ [%{"role" => "user", "content" => user_message}]
-              else
-                history
-              end
-            end)
-            |> then(fn history ->
-              if response_text && response_text != "" do
-                history ++ [%{"role" => "assistant", "content" => response_text}]
-              else
-                history
-              end
-            end)
+          # Get all messages from the chain (includes full metadata, usage, etc.)
+          messages_out = updated_chain.messages
+
+          # Serialize the full message history for storage
+          serialized_history = serialize_messages(messages_out)
 
           # Get tool calls if any
           tool_calls =
@@ -420,12 +422,13 @@ defmodule Play.NodeExecutors do
             end
 
           # Return outputs AND property updates for stateful agent
+          # Both slot 1 and conversation_history contain full message data
           {:ok,
            %{
              0 => response_text,
-             1 => new_history,
+             1 => messages_out,
              2 => tool_calls
-           }, %{"conversation_history" => new_history}}
+           }, %{"conversation_history" => serialized_history}}
 
         {:error, _chain, %LangChain.LangChainError{message: message}} ->
           {:error, "Stateful Agent execution failed: #{message}"}
@@ -461,6 +464,19 @@ defmodule Play.NodeExecutors do
     {:ok, %{0 => value}}
   end
 
+  # Message input node - returns a user message from runtime input
+  # The message content is injected via context[:message_inputs][node_id] at execution time
+  def execute("input/message_input", node, _inputs, _properties, context) do
+    node_id = node["id"]
+    message_inputs = Map.get(context, :message_inputs, %{})
+    content = Map.get(message_inputs, node_id, "")
+
+    # Use dummy message if content is empty to allow workflow to continue
+    actual_content = if content == "" or content == nil, do: "No user message", else: content
+    message = Message.new_user!(actual_content)
+    {:ok, %{0 => message}}
+  end
+
   # ============================================================================
   # Output Nodes
   # ============================================================================
@@ -483,6 +499,15 @@ defmodule Play.NodeExecutors do
     end
 
     {:ok, %{}}
+  end
+
+  # Conversation display node - serializes messages for sidebar display
+  def execute("output/conversation_display", _node, inputs, _properties, _context) do
+    messages = Map.get(inputs, 0, [])
+    serialized_messages = serialize_messages(messages)
+
+    # Return empty outputs but send property update with conversation data
+    {:ok, %{}, %{"conversation_messages" => serialized_messages}}
   end
 
   # ============================================================================
@@ -556,6 +581,165 @@ defmodule Play.NodeExecutors do
   end
 
   defp extract_message_content(_), do: ""
+
+  # Serialize a list of LangChain.Message structs to maps for JSON transport
+  defp serialize_messages(messages) when is_list(messages) do
+    Enum.map(messages, &serialize_message/1)
+  end
+
+  defp serialize_messages(_), do: []
+
+  defp serialize_message(%{role: role, content: _content} = message) do
+    base = %{
+      "role" => to_string(role),
+      "content" => extract_message_content(message)
+    }
+
+    # Add tool_calls if present
+    base =
+      case Map.get(message, :tool_calls) do
+        nil -> base
+        [] -> base
+        tool_calls -> Map.put(base, "tool_calls", serialize_tool_calls(tool_calls))
+      end
+
+    # Add tool_results if present
+    base =
+      case Map.get(message, :tool_results) do
+        nil -> base
+        results -> Map.put(base, "tool_results", serialize_tool_results(results))
+      end
+
+    # Add usage from metadata if present
+    # Access struct fields directly since LangChain.Message doesn't implement Access
+    usage =
+      case message do
+        %{metadata: %{usage: usage}} -> usage
+        _ -> nil
+      end
+
+    case usage do
+      %{input: input, output: output} = u ->
+        raw = Map.get(u, :raw, %{})
+        total = Map.get(raw, "total_tokens", input + output)
+
+        Map.put(base, "usage", %{
+          "input" => input,
+          "output" => output,
+          "total" => total
+        })
+
+      _ ->
+        base
+    end
+  end
+
+  defp serialize_message(%{"role" => _} = message) do
+    # Already a map, just return it
+    message
+  end
+
+  defp serialize_message(_), do: nil
+
+  # Deserialize a map back to a LangChain.Message struct
+  defp deserialize_message(%{"role" => role, "content" => content} = msg) do
+    base_msg =
+      case role do
+        "system" -> Message.new_system!(content)
+        "user" -> Message.new_user!(content)
+        "assistant" -> Message.new_assistant!(content)
+        "tool" -> Message.new_tool_result!(%{tool_use_id: msg["tool_use_id"], content: content})
+        _ -> Message.new_user!(content)
+      end
+
+    # Add tool_calls if present (for assistant messages)
+    base_msg =
+      case msg["tool_calls"] do
+        nil ->
+          base_msg
+
+        [] ->
+          base_msg
+
+        tool_calls when is_list(tool_calls) ->
+          deserialized_calls =
+            Enum.map(tool_calls, fn tc ->
+              %LangChain.Message.ToolCall{
+                call_id: tc["call_id"],
+                name: tc["name"],
+                arguments: tc["arguments"] || %{},
+                type: :function,
+                status: :complete
+              }
+            end)
+
+          %{base_msg | tool_calls: deserialized_calls}
+      end
+
+    # Add usage metadata if present
+    base_msg =
+      case msg["usage"] do
+        %{"input" => input, "output" => output} = usage ->
+          total = usage["total"] || input + output
+
+          token_usage = %LangChain.TokenUsage{
+            input: input,
+            output: output,
+            raw: %{"total_tokens" => total}
+          }
+
+          %{base_msg | metadata: %{usage: token_usage}}
+
+        _ ->
+          base_msg
+      end
+
+    base_msg
+  end
+
+  defp deserialize_message(%Message{} = msg), do: msg
+  defp deserialize_message(_), do: Message.new_user!("")
+
+  defp serialize_tool_calls(tool_calls) when is_list(tool_calls) do
+    tool_calls
+    |> Enum.map(fn
+      %{name: name, arguments: args} = tc ->
+        %{
+          "name" => name,
+          "arguments" => args,
+          "call_id" => Map.get(tc, :call_id) || Map.get(tc, :id)
+        }
+
+      %{"name" => name, "arguments" => args} = tc ->
+        %{
+          "name" => name,
+          "arguments" => args,
+          "call_id" => Map.get(tc, "call_id") || Map.get(tc, "id")
+        }
+
+      _ ->
+        nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp serialize_tool_calls(_), do: []
+
+  defp serialize_tool_results(results) when is_list(results) do
+    Enum.map(results, fn
+      %{content: content, tool_use_id: id} ->
+        %{"content" => content, "tool_use_id" => id}
+
+      %{"content" => content, "tool_use_id" => id} ->
+        %{"content" => content, "tool_use_id" => id}
+
+      other ->
+        %{"content" => inspect(other)}
+    end)
+  end
+
+  defp serialize_tool_results(result) when is_binary(result), do: [%{"content" => result}]
+  defp serialize_tool_results(_), do: []
 
   defp execute_web_search(query, provider, max_results, _search_depth) do
     Logger.info("Executing web search: #{query} via #{provider}")

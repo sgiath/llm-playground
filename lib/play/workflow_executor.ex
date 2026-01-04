@@ -49,11 +49,17 @@ defmodule Play.WorkflowExecutor do
   - `{:execution_complete, results}` - when the entire workflow is done
   - `{:execution_error, reason}` - if an error occurs
   - `{:node_error, node_id, reason}` - if a specific node fails
+
+  ## Options
+  - `:message_inputs` - Map of node_id => message_text for Message Input nodes
   """
-  def execute_async(graph, caller_pid) when is_map(graph) and is_pid(caller_pid) do
+  def execute_async(graph, caller_pid, opts \\ [])
+      when is_map(graph) and is_pid(caller_pid) do
+    message_inputs = Keyword.get(opts, :message_inputs, %{})
+
     spawn(fn ->
       try do
-        results = execute(graph, caller_pid)
+        results = execute(graph, caller_pid, message_inputs: message_inputs)
         send(caller_pid, {:execution_complete, results})
       rescue
         e ->
@@ -72,20 +78,24 @@ defmodule Play.WorkflowExecutor do
 
   Uses event-driven execution where nodes start as soon as their
   dependencies are satisfied, allowing maximum parallelism.
+
+  ## Options
+  - `:message_inputs` - Map of node_id => message_text for Message Input nodes
   """
-  def execute(graph, caller_pid) when is_map(graph) do
+  def execute(graph, caller_pid, opts \\ []) when is_map(graph) do
     nodes = graph["nodes"] || []
     links = graph["links"] || []
+    message_inputs = Keyword.get(opts, :message_inputs, %{})
 
     if Enum.empty?(nodes) do
       Logger.info("Empty workflow, nothing to execute")
       %{}
     else
-      execute_workflow(nodes, links, caller_pid)
+      execute_workflow(nodes, links, caller_pid, message_inputs)
     end
   end
 
-  defp execute_workflow(nodes, links, caller_pid) do
+  defp execute_workflow(nodes, links, caller_pid, message_inputs) do
     # Build all required data structures
     node_map = Map.new(nodes, fn node -> {node["id"], node} end)
     input_links = build_input_links(links)
@@ -104,14 +114,14 @@ defmodule Play.WorkflowExecutor do
       "Executing workflow with #{total_nodes} nodes, #{length(root_nodes)} root nodes: #{inspect(root_nodes)}"
     )
 
-    # Initialize execution state
+    # Initialize execution state with message_inputs in context
     state = %__MODULE__{
       node_map: node_map,
       input_links: input_links,
       dependents: dependents,
       pending_deps: pending_deps,
       outputs: %{},
-      context: %{caller_pid: caller_pid},
+      context: %{caller_pid: caller_pid, message_inputs: message_inputs},
       caller_pid: caller_pid,
       total_nodes: total_nodes,
       completed_count: 0,
@@ -346,28 +356,18 @@ defmodule Play.WorkflowExecutor do
     # Resolve inputs from connected nodes
     inputs = resolve_inputs(node, outputs, input_links)
 
-    Logger.info("""
-    [Executing] Node ##{node_id} (#{node_type})
-      Properties: #{inspect(properties, pretty: true, limit: 50)}
-      Inputs: #{inspect(inputs, pretty: true, limit: 50)}
-    """)
+    Logger.info("[Executing] Node ##{node_id} (#{node_type})")
 
     # Execute the node using NodeExecutors
     result = NodeExecutors.execute(node_type, node, inputs, properties, context)
 
     case result do
       {:ok, node_outputs} ->
-        Logger.info(
-          "[Completed] Node ##{node_id} (#{node_type}) -> #{inspect(node_outputs, limit: 100)}"
-        )
-
+        Logger.info("[Completed] Node ##{node_id} (#{node_type})")
         {:ok, node_outputs}
 
       {:ok, node_outputs, property_updates} ->
-        Logger.info(
-          "[Completed] Node ##{node_id} (#{node_type}) -> #{inspect(node_outputs, limit: 100)} (with property updates)"
-        )
-
+        Logger.info("[Completed] Node ##{node_id} (#{node_type}) (with property updates)")
         {:ok, node_outputs, property_updates}
 
       {:error, reason} ->

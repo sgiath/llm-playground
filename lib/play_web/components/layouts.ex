@@ -89,8 +89,7 @@ defmodule PlayWeb.Layouts do
         </li>
         <li>
           <a href="/sign-out" class="text-error">
-            <.icon name="hero-arrow-right-start-on-rectangle" class="size-4" />
-            Sign Out
+            <.icon name="hero-arrow-right-start-on-rectangle" class="size-4" /> Sign Out
           </a>
         </li>
       </ul>

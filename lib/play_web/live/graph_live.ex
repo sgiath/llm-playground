@@ -22,6 +22,8 @@ defmodule PlayWeb.GraphLive do
 
       graph ->
         graph_data = if graph.data == %{}, do: nil, else: graph.data
+        message_input_nodes = extract_message_input_nodes(graph_data)
+        conversation_display_nodes = extract_conversation_display_nodes(graph_data)
 
         socket =
           socket
@@ -34,9 +36,41 @@ defmodule PlayWeb.GraphLive do
           |> assign(:execution_status, :idle)
           |> assign(:editing_name, false)
           |> assign(:page_title, graph.name)
+          |> assign(:message_input_nodes, message_input_nodes)
+          |> assign(:message_inputs, %{})
+          |> assign(:conversation_display_nodes, conversation_display_nodes)
+          |> assign(:conversation_data, %{})
 
         {:ok, socket}
     end
+  end
+
+  # Extracts message_input nodes from graph data for sidebar display
+  defp extract_message_input_nodes(nil), do: []
+
+  defp extract_message_input_nodes(graph_data) do
+    (graph_data["nodes"] || [])
+    |> Enum.filter(fn node -> node["type"] == "input/message_input" end)
+    |> Enum.map(fn node ->
+      %{
+        id: node["id"],
+        label: get_in(node, ["properties", "label"]) || "User Message"
+      }
+    end)
+  end
+
+  # Extracts conversation_display nodes from graph data for sidebar display
+  defp extract_conversation_display_nodes(nil), do: []
+
+  defp extract_conversation_display_nodes(graph_data) do
+    (graph_data["nodes"] || [])
+    |> Enum.filter(fn node -> node["type"] == "output/conversation_display" end)
+    |> Enum.map(fn node ->
+      %{
+        id: node["id"],
+        label: get_in(node, ["properties", "label"]) || "Conversation"
+      }
+    end)
   end
 
   @impl true
@@ -44,6 +78,50 @@ defmodule PlayWeb.GraphLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="flex h-[calc(100vh-14rem)]">
+        <%!-- Message Input Sidebar (Left) --%>
+        <div
+          :if={@message_input_nodes != []}
+          class="w-72 bg-base-200 border-r border-base-300 flex flex-col"
+        >
+          <div class="p-4 border-b border-base-300">
+            <h2 class="text-sm font-semibold text-base-content/70 uppercase tracking-wide">
+              Message Inputs
+            </h2>
+          </div>
+
+          <div class="flex-1 overflow-y-auto p-4 space-y-4">
+            <div :for={node <- @message_input_nodes} class="space-y-2">
+              <label class="text-sm font-medium text-base-content" for={"message-input-#{node.id}"}>
+                {node.label}
+              </label>
+              <textarea
+                id={"message-input-#{node.id}"}
+                name={"message_input[#{node.id}]"}
+                phx-blur="message_input_changed"
+                phx-keyup="message_input_changed"
+                phx-value-node-id={node.id}
+                phx-debounce="300"
+                placeholder="Type your message..."
+                value={Map.get(@message_inputs, node.id, "")}
+                class="textarea textarea-bordered w-full h-24 text-sm resize-none"
+              ></textarea>
+            </div>
+          </div>
+
+          <div class="p-4 border-t border-base-300">
+            <button
+              phx-click="send_messages"
+              disabled={@execution_status == :running}
+              class={[
+                "btn btn-primary w-full",
+                @execution_status == :running && "btn-disabled"
+              ]}
+            >
+              <.icon name="hero-paper-airplane" class="w-4 h-4" /> Send
+            </button>
+          </div>
+        </div>
+
         <%!-- Graph Canvas Area --%>
         <div class="flex-1 bg-base-300 relative" id="graph-container">
           <canvas
@@ -117,159 +195,44 @@ defmodule PlayWeb.GraphLive do
           </div>
         </div>
 
-        <%!-- Node Details Sidebar --%>
+        <%!-- Conversation Display Sidebar --%>
         <div
-          id="node-sidebar"
+          id="conversation-sidebar"
           class={[
-            "w-80 bg-base-200 border-l border-base-300 overflow-y-auto transition-all duration-200",
-            !@selected_node && "w-0 opacity-0 overflow-hidden"
+            "w-96 bg-base-200 border-l border-base-300 flex flex-col transition-all duration-200",
+            map_size(@conversation_data) == 0 && "w-0 opacity-0 overflow-hidden"
           ]}
         >
-          <div :if={@selected_node} class="p-4">
-            <%!-- Node Header --%>
-            <div class="flex items-start justify-between mb-4">
-              <div>
-                <h2 class="text-lg font-bold text-base-content">
-                  {@selected_node["title"]}
-                </h2>
-                <p class="text-sm text-base-content/60">
-                  {@selected_node["type"]}
-                </p>
-              </div>
-              <div
-                class="w-4 h-4 rounded-full"
-                style={"background-color: #{@selected_node["color"] || "#666"}"}
-              >
-              </div>
+          <div :if={map_size(@conversation_data) > 0} class="flex flex-col h-full">
+            <%!-- Header --%>
+            <div class="p-4 border-b border-base-300 shrink-0">
+              <h2 class="text-sm font-semibold text-base-content/70 uppercase tracking-wide">
+                Conversations
+              </h2>
             </div>
 
-            <%!-- Description --%>
-            <p
-              :if={@selected_node["description"] && @selected_node["description"] != ""}
-              class="text-sm text-base-content/70 mb-4"
-            >
-              {@selected_node["description"]}
-            </p>
-
-            <%!-- Properties Section --%>
-            <div
-              :if={@selected_node["properties"] && map_size(@selected_node["properties"]) > 0}
-              class="mb-4"
-            >
-              <div tabindex="0" class="collapse collapse-arrow bg-base-300 rounded-lg">
-                <input type="checkbox" checked />
-                <div class="collapse-title font-semibold text-sm">
-                  Properties
-                  <span class="badge badge-sm badge-neutral ml-2">
-                    {map_size(@selected_node["properties"])}
-                  </span>
-                </div>
-                <div class="collapse-content">
-                  <div class="space-y-3">
-                    <%= for {key, value} <- @selected_node["properties"] do %>
-                      <div class="text-sm border-b border-base-content/10 last:border-0 pb-2">
-                        <div class="flex items-center gap-2 mb-1">
-                          <span class="font-mono text-base-content/70 font-semibold">{key}</span>
-                          <span class="badge badge-xs badge-ghost">{get_type_label(value)}</span>
-                        </div>
-                        {render_property_value(assigns, key, value)}
-                      </div>
-                    <% end %>
+            <%!-- Conversation Panels --%>
+            <div class="flex-1 overflow-y-auto">
+              <%= for {{node_id, conv_data}, idx} <- Enum.with_index(@conversation_data) do %>
+                <div class="collapse collapse-arrow bg-base-100 border-b border-base-300">
+                  <input
+                    type="radio"
+                    name="conversation-accordion"
+                    checked={idx == 0}
+                  />
+                  <div class="collapse-title font-medium text-sm">
+                    {conv_data.label}
+                    <span class="badge badge-sm badge-ghost ml-2">
+                      {length(conv_data.messages)} messages
+                    </span>
+                  </div>
+                  <div class="collapse-content p-0">
+                    <div class="p-3 space-y-3 max-h-[60vh] overflow-y-auto">
+                      {render_conversation_messages(assigns, conv_data.messages)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
-
-            <%!-- Inputs Section --%>
-            <div :if={@selected_node["inputs"] && length(@selected_node["inputs"]) > 0} class="mb-4">
-              <div tabindex="0" class="collapse collapse-arrow bg-base-300 rounded-lg">
-                <input type="checkbox" checked />
-                <div class="collapse-title font-semibold text-sm">
-                  Inputs
-                  <span class="badge badge-sm badge-neutral ml-2">
-                    {length(@selected_node["inputs"])}
-                  </span>
-                </div>
-                <div class="collapse-content">
-                  <div class="space-y-2">
-                    <%= for input <- @selected_node["inputs"] do %>
-                      <div class="flex items-center gap-2 text-sm py-1">
-                        <span class={[
-                          "w-2 h-2 rounded-full",
-                          input["connected"] && "bg-success",
-                          !input["connected"] && "bg-base-content/30"
-                        ]}>
-                        </span>
-                        <span class="font-mono">{input["name"]}</span>
-                        <span
-                          :if={input["type"]}
-                          class="text-xs text-base-content/50 ml-auto"
-                        >
-                          {input["type"]}
-                        </span>
-                      </div>
-                    <% end %>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <%!-- Outputs Section --%>
-            <div :if={@selected_node["outputs"] && length(@selected_node["outputs"]) > 0} class="mb-4">
-              <div tabindex="0" class="collapse collapse-arrow bg-base-300 rounded-lg">
-                <input type="checkbox" checked />
-                <div class="collapse-title font-semibold text-sm">
-                  Outputs
-                  <span class="badge badge-sm badge-neutral ml-2">
-                    {length(@selected_node["outputs"])}
-                  </span>
-                </div>
-                <div class="collapse-content">
-                  <div class="space-y-2">
-                    <%= for output <- @selected_node["outputs"] do %>
-                      <div class="flex items-center gap-2 text-sm py-1">
-                        <span class={[
-                          "w-2 h-2 rounded-full",
-                          output["connected"] && "bg-success",
-                          !output["connected"] && "bg-base-content/30"
-                        ]}>
-                        </span>
-                        <span class="font-mono">{output["name"]}</span>
-                        <span
-                          :if={output["connection_count"] && output["connection_count"] > 0}
-                          class="badge badge-xs badge-success"
-                        >
-                          {output["connection_count"]}
-                        </span>
-                        <span
-                          :if={output["type"]}
-                          class="text-xs text-base-content/50 ml-auto"
-                        >
-                          {output["type"]}
-                        </span>
-                      </div>
-                    <% end %>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <%!-- Node Info Section --%>
-            <div class="text-xs text-base-content/50 space-y-1 mt-4 pt-4 border-t border-base-content/10">
-              <p>ID: {@selected_node["node_id"]}</p>
-              <p :if={@selected_node["pos"]}>
-                Position: ({get_array_value(@selected_node["pos"], 0) |> round()}, {get_array_value(
-                  @selected_node["pos"],
-                  1
-                )
-                |> round()})
-              </p>
-              <p :if={@selected_node["size"]}>
-                Size: {get_array_value(@selected_node["size"], 0)}×{get_array_value(
-                  @selected_node["size"],
-                  1
-                )}
-              </p>
+              <% end %>
             </div>
           </div>
         </div>
@@ -278,130 +241,189 @@ defmodule PlayWeb.GraphLive do
     """
   end
 
-  # Get type label for display
-  defp get_type_label(value) when is_binary(value), do: "string"
-  defp get_type_label(value) when is_list(value), do: "array[#{length(value)}]"
-  defp get_type_label(value) when is_map(value), do: "object"
-  defp get_type_label(value) when is_boolean(value), do: "boolean"
-  defp get_type_label(value) when is_number(value), do: "number"
-  defp get_type_label(nil), do: "null"
-  defp get_type_label(_), do: "unknown"
+  # ============================================================================
+  # Conversation Display Helpers
+  # ============================================================================
 
-  # Render property value based on type
-  defp render_property_value(assigns, key, value) when is_list(value) and length(value) > 0 do
-    assigns = assign(assigns, :items, value) |> assign(:key, key)
+  # Render all messages in a conversation
+  defp render_conversation_messages(assigns, messages) when is_list(messages) do
+    # Separate system message from the rest
+    {system_messages, chat_messages} =
+      Enum.split_with(messages, fn msg -> msg["role"] == "system" end)
+
+    assigns =
+      assigns
+      |> assign(:system_messages, system_messages)
+      |> assign(:chat_messages, chat_messages)
 
     ~H"""
-    <div class="bg-base-100 rounded-lg p-2 max-h-48 overflow-y-auto">
-      <%= for {item, idx} <- Enum.with_index(@items) do %>
-        <div class="text-xs border-b border-base-content/5 last:border-0 py-1">
-          <span class="text-base-content/40 mr-2">[{idx}]</span>
-          <span class="font-mono">{format_list_item(item)}</span>
+    <%!-- System Message Banner --%>
+    <div :if={@system_messages != []} class="mb-3">
+      <div class="collapse collapse-arrow bg-base-200 rounded-lg">
+        <input type="checkbox" />
+        <div class="collapse-title text-xs font-medium text-base-content/70 py-2 min-h-0">
+          <.icon name="hero-cog-6-tooth" class="w-3 h-3 mr-1" /> System Prompt
+        </div>
+        <div class="collapse-content">
+          <p class="text-xs text-base-content/80 whitespace-pre-wrap">
+            {Enum.map_join(@system_messages, "\n\n", & &1["content"])}
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <%!-- Chat Messages --%>
+    <div class="space-y-2">
+      <%= for message <- @chat_messages do %>
+        {render_chat_message(assigns, message)}
+      <% end %>
+    </div>
+    """
+  end
+
+  defp render_conversation_messages(assigns, _), do: ~H""
+
+  # Render a single chat message
+  defp render_chat_message(assigns, %{"role" => "user"} = message) do
+    assigns = assign(assigns, :message, message)
+
+    ~H"""
+    <div class="chat chat-start">
+      <div class="chat-header text-xs opacity-70 mb-1">
+        User
+      </div>
+      <div class="chat-bubble chat-bubble-primary text-sm">
+        {@message["content"]}
+      </div>
+    </div>
+    """
+  end
+
+  defp render_chat_message(assigns, %{"role" => "assistant"} = message) do
+    assigns = assign(assigns, :message, message)
+
+    ~H"""
+    <div class="chat chat-end">
+      <div class="chat-header text-xs opacity-70 mb-1">
+        Assistant
+      </div>
+      <div class="chat-bubble chat-bubble-neutral text-sm">
+        <div class="whitespace-pre-wrap">{@message["content"]}</div>
+
+        <%!-- Tool Calls --%>
+        <div :if={@message["tool_calls"] && @message["tool_calls"] != []} class="mt-2">
+          {render_tool_calls(assigns, @message["tool_calls"])}
+        </div>
+
+        <%!-- Token Usage --%>
+        <div :if={@message["usage"]} class="mt-2 pt-2 border-t border-base-content/20">
+          {render_token_usage(assigns, @message["usage"])}
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_chat_message(assigns, %{"role" => "tool"} = message) do
+    assigns = assign(assigns, :message, message)
+
+    ~H"""
+    <div class="chat chat-end">
+      <div class="chat-header text-xs opacity-70 mb-1">
+        <.icon name="hero-wrench-screwdriver" class="w-3 h-3 mr-1" /> Tool Result
+      </div>
+      <div class="chat-bubble chat-bubble-accent text-xs font-mono">
+        <div class="max-h-32 overflow-y-auto whitespace-pre-wrap">
+          {truncate_content(@message["content"], 500)}
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_chat_message(assigns, message) do
+    assigns = assign(assigns, :message, message)
+
+    ~H"""
+    <div class="chat chat-start">
+      <div class="chat-header text-xs opacity-70 mb-1">
+        {String.capitalize(@message["role"] || "unknown")}
+      </div>
+      <div class="chat-bubble text-sm">
+        {@message["content"]}
+      </div>
+    </div>
+    """
+  end
+
+  # Render tool calls
+  defp render_tool_calls(assigns, tool_calls) when is_list(tool_calls) do
+    assigns = assign(assigns, :tool_calls, tool_calls)
+
+    ~H"""
+    <div class="space-y-1">
+      <%= for tc <- @tool_calls do %>
+        <div class="collapse collapse-arrow bg-base-300/50 rounded">
+          <input type="checkbox" />
+          <div class="collapse-title text-xs py-1 min-h-0 font-mono">
+            <.icon name="hero-wrench-screwdriver" class="w-3 h-3 mr-1" />
+            {tc["name"]}
+          </div>
+          <div class="collapse-content">
+            <pre class="text-xs overflow-x-auto whitespace-pre-wrap">{format_json(tc["arguments"])}</pre>
+          </div>
         </div>
       <% end %>
     </div>
     """
   end
 
-  defp render_property_value(assigns, _key, value) when is_list(value) do
-    ~H"""
-    <span class="font-mono text-xs text-base-content/50">[]</span>
-    """
-  end
+  defp render_tool_calls(assigns, _), do: ~H""
 
-  defp render_property_value(assigns, _key, value) when is_map(value) do
-    assigns = assign(assigns, :value, value)
+  # Render token usage stats
+  defp render_token_usage(assigns, usage) when is_map(usage) do
+    assigns = assign(assigns, :usage, usage)
 
     ~H"""
-    <div class="bg-base-100 rounded-lg p-2 max-h-32 overflow-y-auto">
-      <pre class="text-xs font-mono whitespace-pre-wrap break-all">{Jason.encode!(@value, pretty: true)}</pre>
+    <div class="flex flex-wrap gap-2 text-xs">
+      <span class="badge badge-xs badge-ghost">
+        <.icon name="hero-arrow-down-tray" class="w-2 h-2 mr-1" />
+        {@usage["input"] || 0} in
+      </span>
+      <span class="badge badge-xs badge-ghost">
+        <.icon name="hero-arrow-up-tray" class="w-2 h-2 mr-1" />
+        {@usage["output"] || 0} out
+      </span>
+      <span class="badge badge-xs badge-info">
+        Σ {@usage["total"] || 0}
+      </span>
     </div>
     """
   end
 
-  defp render_property_value(assigns, _key, value) when is_binary(value) do
-    assigns = assign(assigns, :value, value)
+  defp render_token_usage(assigns, _), do: ~H""
 
-    ~H"""
-    <div class={[
-      "font-mono text-xs bg-base-100 px-2 py-1 rounded",
-      String.length(@value) > 100 && "max-h-24 overflow-y-auto"
-    ]}>
-      <span class="whitespace-pre-wrap break-all">{@value}</span>
-    </div>
-    """
-  end
-
-  defp render_property_value(assigns, _key, value) when is_boolean(value) do
-    assigns = assign(assigns, :value, value)
-
-    ~H"""
-    <span class={[
-      "badge badge-sm",
-      @value && "badge-success",
-      !@value && "badge-neutral"
-    ]}>
-      {to_string(@value)}
-    </span>
-    """
-  end
-
-  defp render_property_value(assigns, _key, value) when is_number(value) do
-    assigns = assign(assigns, :value, value)
-
-    ~H"""
-    <span class="font-mono text-xs bg-base-100 px-2 py-1 rounded">{@value}</span>
-    """
-  end
-
-  defp render_property_value(assigns, _key, nil) do
-    ~H"""
-    <span class="font-mono text-xs text-base-content/40 italic">null</span>
-    """
-  end
-
-  defp render_property_value(assigns, _key, value) do
-    assigns = assign(assigns, :value, inspect(value, limit: 200))
-
-    ~H"""
-    <span class="font-mono text-xs bg-base-100 px-2 py-1 rounded">{@value}</span>
-    """
-  end
-
-  # Format list items for display (especially for conversation history)
-  defp format_list_item(item) when is_map(item) do
-    cond do
-      # Chat message format
-      Map.has_key?(item, "role") and Map.has_key?(item, "content") ->
-        role = item["role"]
-        content = item["content"]
-
-        truncated =
-          if String.length(content || "") > 80,
-            do: String.slice(content, 0, 77) <> "...",
-            else: content
-
-        "#{role}: #{truncated}"
-
-      true ->
-        Jason.encode!(item)
+  # Format JSON for display
+  defp format_json(data) when is_map(data) do
+    case Jason.encode(data, pretty: true) do
+      {:ok, json} -> json
+      _ -> inspect(data)
     end
   end
 
-  defp format_list_item(item) when is_binary(item) do
-    if String.length(item) > 100 do
-      String.slice(item, 0, 97) <> "..."
+  defp format_json(data) when is_binary(data), do: data
+  defp format_json(data), do: inspect(data)
+
+  # Truncate long content
+  defp truncate_content(content, max_length) when is_binary(content) do
+    if String.length(content) > max_length do
+      String.slice(content, 0, max_length) <> "..."
     else
-      item
+      content
     end
   end
 
-  defp format_list_item(item), do: inspect(item, limit: 50)
-
-  # Get value from array (handles both list and map with string keys from JS)
-  defp get_array_value(data, index) when is_list(data), do: Enum.at(data, index, 0)
-  defp get_array_value(data, index) when is_map(data), do: Map.get(data, to_string(index), 0)
-  defp get_array_value(_, _), do: 0
+  defp truncate_content(content, _), do: inspect(content)
 
   # ============================================================================
   # Event Handlers
@@ -435,6 +457,8 @@ defmodule PlayWeb.GraphLive do
 
     node_count = length(graph_data["nodes"] || [])
     link_count = length(graph_data["links"] || [])
+    message_input_nodes = extract_message_input_nodes(graph_data)
+    conversation_display_nodes = extract_conversation_display_nodes(graph_data)
 
     # Skip the initial empty graph state if we have a saved graph to load
     # This prevents the JS initialization from overwriting our saved state
@@ -453,6 +477,8 @@ defmodule PlayWeb.GraphLive do
             |> assign(:graph_state, graph_data)
             |> assign(:node_count, node_count)
             |> assign(:link_count, link_count)
+            |> assign(:message_input_nodes, message_input_nodes)
+            |> assign(:conversation_display_nodes, conversation_display_nodes)
 
           {:error, _changeset} ->
             Logger.error("Failed to save graph to database")
@@ -461,6 +487,8 @@ defmodule PlayWeb.GraphLive do
             |> assign(:graph_state, graph_data)
             |> assign(:node_count, node_count)
             |> assign(:link_count, link_count)
+            |> assign(:message_input_nodes, message_input_nodes)
+            |> assign(:conversation_display_nodes, conversation_display_nodes)
         end
 
       {:noreply, socket}
@@ -582,6 +610,41 @@ defmodule PlayWeb.GraphLive do
       socket =
         socket
         |> assign(:execution_status, :running)
+        |> assign(:conversation_data, %{})
+        |> push_event("request_execution", %{})
+
+      {:noreply, socket}
+    end
+  end
+
+  # Handle message input text changes
+  @impl true
+  def handle_event(
+        "message_input_changed",
+        %{"value" => value, "node-id" => node_id_str},
+        socket
+      ) do
+    node_id = String.to_integer(node_id_str)
+    message_inputs = Map.put(socket.assigns.message_inputs, node_id, value)
+    {:noreply, assign(socket, :message_inputs, message_inputs)}
+  end
+
+  def handle_event("message_input_changed", _params, socket) do
+    # Fallback if node-id is missing
+    {:noreply, socket}
+  end
+
+  # Handle send messages button click
+  @impl true
+  def handle_event("send_messages", _params, socket) do
+    if socket.assigns.execution_status == :running do
+      {:noreply, socket}
+    else
+      # Request the current graph from JS for execution with message inputs
+      socket =
+        socket
+        |> assign(:execution_status, :running)
+        |> assign(:conversation_data, %{})
         |> push_event("request_execution", %{})
 
       {:noreply, socket}
@@ -593,8 +656,9 @@ defmodule PlayWeb.GraphLive do
   def handle_event("execute_workflow", %{"graph" => graph}, socket) do
     Logger.info("Starting workflow execution with #{length(graph["nodes"] || [])} nodes")
 
-    # Start async execution
-    WorkflowExecutor.execute_async(graph, self())
+    # Start async execution with message inputs
+    message_inputs = socket.assigns.message_inputs
+    WorkflowExecutor.execute_async(graph, self(), message_inputs: message_inputs)
 
     {:noreply, socket}
   end
@@ -649,6 +713,28 @@ defmodule PlayWeb.GraphLive do
   def handle_info({:update_node_properties, node_id, properties}, socket) do
     Logger.debug("Updating properties for node #{node_id}: #{inspect(properties, limit: 50)}")
 
+    # Check if this is a conversation_display node with conversation messages
+    socket =
+      case Map.get(properties, "conversation_messages") do
+        nil ->
+          socket
+
+        messages ->
+          # Find the node's label from conversation_display_nodes
+          label =
+            Enum.find_value(socket.assigns.conversation_display_nodes, "Conversation", fn node ->
+              if node.id == node_id, do: node.label
+            end)
+
+          conversation_data =
+            Map.put(socket.assigns.conversation_data, node_id, %{
+              label: label,
+              messages: messages
+            })
+
+          assign(socket, :conversation_data, conversation_data)
+      end
+
     socket =
       push_event(socket, "update_node_properties", %{node_id: node_id, properties: properties})
 
@@ -662,7 +748,9 @@ defmodule PlayWeb.GraphLive do
     socket =
       socket
       |> assign(:execution_status, :complete)
+      |> assign(:message_inputs, %{})
       |> push_event("execution_complete", %{})
+      |> push_event("clear_message_inputs", %{})
 
     {:noreply, socket}
   end

@@ -149,6 +149,7 @@ const LitegraphHook = {
             Object.keys(LiteGraph.registered_node_types)
           );
           try {
+            // graph.configure override handles _graphLoading flag
             this.graph.configure(this.pendingGraphLoad);
             // Force canvas redraw
             this.graphCanvas.setDirty(true, true);
@@ -216,6 +217,9 @@ const LitegraphHook = {
 
     // Server requests current graph for execution
     this.handleEvent("request_execution", () => {
+      // Reset execution state before starting new execution
+      // This ensures all nodes start with their default colors
+      this.resetExecutionState();
       // Clear any previous streaming content
       this.streamingContent.clear();
       const graphData = this.graph.serialize();
@@ -316,17 +320,24 @@ const LitegraphHook = {
     // Entire execution is complete
     this.handleEvent("execution_complete", () => {
       console.log("Workflow execution complete");
-
-      // Wait a moment then restore original colors
-      setTimeout(() => {
-        this.resetExecutionState();
-      }, 2000);
+      // Keep nodes green to show successful execution
+      // Execution state will be reset when:
+      // 1. User changes a node's config (widget value)
+      // 2. A new execution starts
     });
 
     // Execution error occurred
     this.handleEvent("execution_error", (payload) => {
       console.error("Workflow execution error:", payload.reason);
       this.resetExecutionState();
+    });
+
+    // Clear message input textareas
+    this.handleEvent("clear_message_inputs", () => {
+      // Find all message input textareas and clear them
+      document.querySelectorAll('textarea[id^="message-input-"]').forEach((textarea) => {
+        textarea.value = "";
+      });
     });
   },
 
@@ -582,6 +593,9 @@ const LitegraphHook = {
       ) {
         const config = this._dynamic_inputs;
         if (!config || !config.auto_add) return;
+
+        // Skip auto-add during graph loading (global flag set before graph.configure)
+        if (hook._graphLoading) return;
 
         // Only handle input connections (connectionType === 1 is INPUT in LiteGraph)
         if (connectionType !== 1) return;
@@ -867,7 +881,15 @@ const LitegraphHook = {
     // Override configure to detect when graph is loaded
     const originalConfigure = this.graph.configure.bind(this.graph);
     this.graph.configure = (data) => {
-      originalConfigure(data);
+      // Set global loading flag to prevent auto-add during graph restore
+      const wasLoading = hook._graphLoading;
+      hook._graphLoading = true;
+      try {
+        originalConfigure(data);
+      } finally {
+        // Restore previous state (in case of nested calls)
+        hook._graphLoading = wasLoading;
+      }
       hook.pushEvent("graph_loaded", { node_count: hook.graph._nodes.length });
       hook.pushGraphState("graph_loaded");
     };
@@ -943,6 +965,20 @@ const LitegraphHook = {
 
     // Track property changes via widget interaction
     this.graphCanvas.onWidgetChanged = (name, value, oldValue, widget, node) => {
+      // If this node was in completed or executing state, reset its color
+      // This indicates that the new config hasn't been tested yet
+      if (hook.completedNodes.has(node.id) || hook.executingNodes.has(node.id)) {
+        const original = hook.originalColors.get(node.id);
+        if (original) {
+          node.color = original.color;
+          node.bgcolor = original.bgcolor;
+          hook.completedNodes.delete(node.id);
+          hook.executingNodes.delete(node.id);
+          hook.originalColors.delete(node.id);
+          hook.graphCanvas.setDirty(true, true);
+        }
+      }
+
       hook.pushEvent("property_changed", {
         node_id: node.id,
         property: name,
@@ -954,8 +990,32 @@ const LitegraphHook = {
   },
 
   // Push the full serialized graph state to LiveView
+  // Temporarily restores original colors before serialization to avoid saving execution state
   pushGraphState(trigger) {
+    // Temporarily restore original colors before serialization
+    const executionColors = new Map();
+    for (const [node_id, colors] of this.originalColors) {
+      const node = this.graph.getNodeById(node_id);
+      if (node) {
+        // Store current execution colors
+        executionColors.set(node_id, { color: node.color, bgcolor: node.bgcolor });
+        // Restore original colors for serialization
+        node.color = colors.color;
+        node.bgcolor = colors.bgcolor;
+      }
+    }
+
     const graphData = this.graph.serialize();
+
+    // Restore execution colors after serialization
+    for (const [node_id, colors] of executionColors) {
+      const node = this.graph.getNodeById(node_id);
+      if (node) {
+        node.color = colors.color;
+        node.bgcolor = colors.bgcolor;
+      }
+    }
+
     this.pushEvent("graph_state_changed", {
       trigger: trigger,
       graph: graphData,

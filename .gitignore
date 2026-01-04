@@ -38,3 +38,4 @@ npm-debug.log
 /direnv/
 /,elixir-tools/
 .env
+/.cursor/debug.log

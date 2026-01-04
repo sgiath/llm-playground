@@ -34,10 +34,12 @@ defmodule Play.Web.Live.Nodes do
       text_input_node(),
       number_input_node(),
       variable_node(),
+      message_input_node(),
 
       # Output nodes
       display_node(),
       console_node(),
+      conversation_display_node(),
 
       # Utility nodes
       message_builder_node(),
@@ -334,7 +336,7 @@ defmodule Play.Web.Live.Nodes do
       inputs: [
         %{name: "llm_config", type: "llm_config"},
         %{name: "system", type: "text"},
-        %{name: "user_message", type: "text"},
+        %{name: "user_message", type: "message"},
         %{name: "tools", type: "tools"}
       ],
       outputs: [
@@ -489,6 +491,36 @@ defmodule Play.Web.Live.Nodes do
     }
   end
 
+  defp message_input_node do
+    %{
+      type: "message_input",
+      title: "Message Input",
+      description:
+        "User message input that appears in the sidebar. When present, a textarea will be shown for user input.",
+      category: "input",
+      outputs: [%{name: "message", type: "message"}],
+      properties: [
+        %{name: "label", default: "User Message"}
+      ],
+      widgets: [
+        %{
+          type: "text",
+          name: "Label",
+          property: "label",
+          default: "User Message"
+        }
+      ],
+      size: [200, 60],
+      color: "#22c55e",
+      bgcolor: "#1a1a2e",
+      execute_code: """
+      // Runtime value is injected by the server during execution
+      // This returns a placeholder that will be replaced by actual user input
+      return { role: 'user', content: properties._runtime_value || '' };
+      """
+    }
+  end
+
   # ============================================================================
   # Output Nodes
   # ============================================================================
@@ -535,6 +567,33 @@ defmodule Play.Web.Live.Nodes do
       execute_code: """
       const prefix = properties.prefix ? properties.prefix + ': ' : '';
       console.log(prefix, inputs[0]);
+      """
+    }
+  end
+
+  defp conversation_display_node do
+    %{
+      type: "conversation_display",
+      title: "Conversation Display",
+      description:
+        "Displays conversation messages in the sidebar. Connect to an Agent's messages_out output to view the full conversation with system prompts, tool calls, and token usage.",
+      category: "output",
+      inputs: [%{name: "messages", type: "messages"}],
+      properties: [%{name: "label", default: "Conversation"}],
+      widgets: [
+        %{
+          type: "text",
+          name: "Label",
+          property: "label",
+          default: "Conversation"
+        }
+      ],
+      size: [200, 60],
+      color: "#f59e0b",
+      bgcolor: "#1a1a2e",
+      execute_code: """
+      // Store the messages for server-side processing and sidebar display
+      this.properties._messages = inputs[0] || [];
       """
     }
   end
