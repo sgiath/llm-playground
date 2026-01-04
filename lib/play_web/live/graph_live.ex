@@ -5,6 +5,8 @@ defmodule PlayWeb.GraphLive do
   alias Play.Web.Live.Nodes
   alias Play.WorkflowExecutor
 
+  import PlayWeb.Helpers.Markdown, only: [render_markdown: 1]
+
   require Logger
 
   @impl true
@@ -41,6 +43,7 @@ defmodule PlayWeb.GraphLive do
           |> assign(:conversation_display_nodes, conversation_display_nodes)
           |> assign(:conversation_data, %{})
           |> assign(:execution_outputs, %{})
+          |> assign(:streaming_content, %{})
 
         {:ok, socket}
     end
@@ -201,40 +204,66 @@ defmodule PlayWeb.GraphLive do
           id="conversation-sidebar"
           class={[
             "w-96 bg-base-200 border-l border-base-300 flex flex-col transition-all duration-200",
-            map_size(@conversation_data) == 0 && "w-0 opacity-0 overflow-hidden"
+            map_size(@conversation_data) == 0 && map_size(@streaming_content) == 0 &&
+              "w-0 opacity-0 overflow-hidden"
           ]}
         >
-          <div :if={map_size(@conversation_data) > 0} class="flex flex-col h-full">
+          <div
+            :if={map_size(@conversation_data) > 0 || map_size(@streaming_content) > 0}
+            class="flex flex-col h-full"
+          >
             <%!-- Header --%>
             <div class="p-4 border-b border-base-300 shrink-0">
               <h2 class="text-sm font-semibold text-base-content/70 uppercase tracking-wide">
-                Conversations
+                <%= if map_size(@conversation_data) == 1 do %>
+                  <% [{_node_id, conv_data}] = Enum.to_list(@conversation_data) %>
+                  {conv_data.label}
+                <% else %>
+                  Conversations
+                <% end %>
               </h2>
             </div>
 
+            <%!-- Streaming Content --%>
+            <div
+              :if={map_size(@streaming_content) > 0}
+              class="p-3 border-b border-base-300 bg-base-100"
+            >
+              {render_all_streaming_content(assigns)}
+            </div>
+
             <%!-- Conversation Panels --%>
-            <div class="flex-1 overflow-y-auto">
-              <%= for {{node_id, conv_data}, idx} <- Enum.with_index(@conversation_data) do %>
-                <div class="collapse collapse-arrow bg-base-100 border-b border-base-300">
-                  <input
-                    type="radio"
-                    name="conversation-accordion"
-                    checked={idx == 0}
-                  />
-                  <div class="collapse-title font-medium text-sm">
-                    {conv_data.label}
-                    <span class="badge badge-sm badge-ghost ml-2">
-                      {length(conv_data.messages)} messages
-                    </span>
-                  </div>
-                  <div class="collapse-content p-0">
-                    <div class="p-3 space-y-3 max-h-[60vh] overflow-y-auto">
-                      {render_conversation_messages(assigns, conv_data.messages)}
+            <%= if map_size(@conversation_data) == 1 do %>
+              <%!-- Single conversation: full height, no accordion --%>
+              <% [{_node_id, conv_data}] = Enum.to_list(@conversation_data) %>
+              <div class="flex-1 overflow-y-auto p-3 space-y-3">
+                {render_conversation_messages(assigns, conv_data.messages)}
+              </div>
+            <% else %>
+              <%!-- Multiple conversations: use accordion --%>
+              <div class="flex-1 overflow-y-auto">
+                <%= for {{_node_id, conv_data}, idx} <- Enum.with_index(@conversation_data) do %>
+                  <div class="collapse collapse-arrow bg-base-100 border-b border-base-300">
+                    <input
+                      type="radio"
+                      name="conversation-accordion"
+                      checked={idx == 0}
+                    />
+                    <div class="collapse-title font-medium text-sm">
+                      {conv_data.label}
+                      <span class="badge badge-sm badge-ghost ml-2">
+                        {length(conv_data.messages)} messages
+                      </span>
+                    </div>
+                    <div class="collapse-content p-0">
+                      <div class="p-3 space-y-3 max-h-[60vh] overflow-y-auto">
+                        {render_conversation_messages(assigns, conv_data.messages)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              <% end %>
-            </div>
+                <% end %>
+              </div>
+            <% end %>
           </div>
         </div>
       </div>
@@ -284,6 +313,32 @@ defmodule PlayWeb.GraphLive do
 
   defp render_conversation_messages(assigns, _), do: ~H""
 
+  # Render all streaming content with loading indicators
+  defp render_all_streaming_content(assigns) do
+    streaming_entries =
+      assigns.streaming_content
+      |> Enum.filter(fn {_node_id, content} -> content != "" end)
+      |> Enum.map(fn {node_id, content} ->
+        %{node_id: node_id, content: content, rendered: render_markdown(content)}
+      end)
+
+    assigns = assign(assigns, :streaming_entries, streaming_entries)
+
+    ~H"""
+    <div class="space-y-2">
+      <div :for={entry <- @streaming_entries} class="chat chat-end">
+        <div class="chat-header text-xs opacity-70 mb-1">
+          Assistant
+        </div>
+        <div class="chat-bubble chat-bubble-neutral text-sm chat-markdown">
+          <div>{Phoenix.HTML.raw(entry.rendered)}</div>
+          <span class="loading loading-dots loading-xs ml-1"></span>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
   # Render a single chat message
   defp render_chat_message(assigns, %{"role" => "user"} = message) do
     assigns = assign(assigns, :message, message)
@@ -303,15 +358,22 @@ defmodule PlayWeb.GraphLive do
   defp render_chat_message(assigns, %{"role" => "assistant"} = message) do
     # Extract usage from metadata (where serializer stores it)
     usage = get_in(message, ["metadata", "usage"])
-    assigns = assigns |> assign(:message, message) |> assign(:usage, usage)
+    content = extract_text_content(message["content"])
+    rendered_content = render_markdown(content)
+
+    assigns =
+      assigns
+      |> assign(:message, message)
+      |> assign(:usage, usage)
+      |> assign(:rendered_content, rendered_content)
 
     ~H"""
     <div class="chat chat-end">
       <div class="chat-header text-xs opacity-70 mb-1">
         Assistant
       </div>
-      <div class="chat-bubble chat-bubble-neutral text-sm">
-        <div class="whitespace-pre-wrap">{extract_text_content(@message["content"])}</div>
+      <div class="chat-bubble chat-bubble-neutral text-sm chat-markdown">
+        <div>{Phoenix.HTML.raw(@rendered_content)}</div>
 
         <%!-- Tool Calls --%>
         <div :if={@message["tool_calls"] && @message["tool_calls"] != []} class="mt-2">
@@ -647,6 +709,7 @@ defmodule PlayWeb.GraphLive do
         socket
         |> assign(:execution_status, :running)
         |> assign(:conversation_data, %{})
+        |> assign(:streaming_content, %{})
         |> push_event("request_execution", %{})
 
       {:noreply, socket}
@@ -681,6 +744,7 @@ defmodule PlayWeb.GraphLive do
         socket
         |> assign(:execution_status, :running)
         |> assign(:conversation_data, %{})
+        |> assign(:streaming_content, %{})
         |> push_event("request_execution", %{})
 
       {:noreply, socket}
@@ -936,6 +1000,9 @@ defmodule PlayWeb.GraphLive do
     # Store execution outputs for later use (e.g., manual save)
     execution_outputs = Map.put(socket.assigns.execution_outputs, node_id, result)
 
+    # Clear streaming content for the completed node
+    streaming_content = Map.delete(socket.assigns.streaming_content, node_id)
+
     # Extract the primary output value (slot 0) for display nodes
     output_value =
       case result do
@@ -947,6 +1014,7 @@ defmodule PlayWeb.GraphLive do
     socket =
       socket
       |> assign(:execution_outputs, execution_outputs)
+      |> assign(:streaming_content, streaming_content)
       |> push_event("node_completed", %{node_id: node_id, output: output_value})
 
     {:noreply, socket}
@@ -954,8 +1022,16 @@ defmodule PlayWeb.GraphLive do
 
   @impl true
   def handle_info({:stream_delta, node_id, content}, socket) do
-    # Push streaming content to JS for real-time display
-    socket = push_event(socket, "stream_delta", %{node_id: node_id, content: content})
+    # Accumulate streaming content for markdown rendering
+    streaming_content =
+      Map.update(socket.assigns.streaming_content, node_id, content, &(&1 <> content))
+
+    # Also push to JS for display nodes
+    socket =
+      socket
+      |> assign(:streaming_content, streaming_content)
+      |> push_event("stream_delta", %{node_id: node_id, content: content})
+
     {:noreply, socket}
   end
 

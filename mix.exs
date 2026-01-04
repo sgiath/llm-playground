@@ -68,6 +68,7 @@ defmodule Play.MixProject do
       {:swoosh, "~> 1.20"},
       {:req, "~> 0.5"},
       {:gettext, "~> 1.0"},
+      {:mdex, "~> 0.10"},
 
       # deployment
       {:telemetry_metrics, "~> 1.1"},

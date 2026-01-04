@@ -751,7 +751,7 @@ defmodule Play.Web.Live.Nodes do
           type: "number",
           name: "Max Results",
           property: "max_results",
-          default: 5,
+          default: 10,
           options: %{min: 1, max: 20, step: 1}
         }
       ],
