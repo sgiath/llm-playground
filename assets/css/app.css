@@ -106,3 +106,7 @@
 }
 
 /* This file is for your main application CSS */
+
+/* Litegraph node editor styles */
+@import "./litegraph.css";
+@import "./litegraph-editor.css";

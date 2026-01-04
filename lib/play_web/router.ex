@@ -19,6 +19,15 @@ defmodule PlayWeb.Router do
     get "/", PageController, :home
   end
 
+  scope "/", PlayWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :authenticated, on_mount: {SgiathAuth, :require_authenticated} do
+      live "/graph", GraphListLive
+      live "/graph/:graph_id", GraphLive
+    end
+  end
+
   scope "/", SgiathAuth do
     pipe_through :browser
 

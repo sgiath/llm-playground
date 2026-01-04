@@ -20,14 +20,39 @@ config :sgiath_auth,
   workos_secret_key: workos_secret_key
 
 # OpenRouter API configuration (used via LangChain's ChatOpenAI with custom endpoint)
-openrouter_api_key =
-  System.get_env("OPENROUTER_API_KEY") ||
+openai_api_key =
+  System.get_env("OPENAI_API_KEY") ||
     raise """
     environment variable OPENROUTER_API_KEY is missing.
-    Get it from your OpenRouter dashboard at https://openrouter.ai
+    Get it from your OpenAI dashboard at https://openai.com
     """
 
-config :langchain, openai_key: openrouter_api_key
+anthropic_api_key =
+  System.get_env("ANTHROPIC_API_KEY") ||
+    raise """
+    environment variable ANTHROPIC_API_KEY is missing.
+    Get it from your Anthropic dashboard at https://anthropic.com
+    """
+
+google_ai_api_key =
+  System.get_env("GEMINI_API_KEY") ||
+    raise """
+    environment variable GEMINI_API_KEY is missing.
+    Get it from your Google Gemini dashboard at https://ai.google.com
+    """
+
+xai_api_key =
+  System.get_env("XAI_API_KEY") ||
+    raise """
+    environment variable XAI_API_KEY is missing.
+    Get it from your xAI dashboard at https://xai.com
+    """
+
+config :langchain,
+  openai_key: openai_api_key,
+  anthropic_key: anthropic_api_key,
+  google_ai_key: google_ai_api_key,
+  grok_key: xai_api_key
 
 if System.get_env("PHX_SERVER") do
   config :play, PlayWeb.Endpoint, server: true
