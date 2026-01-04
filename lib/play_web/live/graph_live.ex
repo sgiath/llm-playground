@@ -40,6 +40,7 @@ defmodule PlayWeb.GraphLive do
           |> assign(:message_inputs, %{})
           |> assign(:conversation_display_nodes, conversation_display_nodes)
           |> assign(:conversation_data, %{})
+          |> assign(:execution_outputs, %{})
 
         {:ok, socket}
     end
@@ -266,7 +267,7 @@ defmodule PlayWeb.GraphLive do
         </div>
         <div class="collapse-content">
           <p class="text-xs text-base-content/80 whitespace-pre-wrap">
-            {Enum.map_join(@system_messages, "\n\n", & &1["content"])}
+            {Enum.map_join(@system_messages, "\n\n", &extract_text_content(&1["content"]))}
           </p>
         </div>
       </div>
@@ -293,14 +294,16 @@ defmodule PlayWeb.GraphLive do
         User
       </div>
       <div class="chat-bubble chat-bubble-primary text-sm">
-        {@message["content"]}
+        {extract_text_content(@message["content"])}
       </div>
     </div>
     """
   end
 
   defp render_chat_message(assigns, %{"role" => "assistant"} = message) do
-    assigns = assign(assigns, :message, message)
+    # Extract usage from metadata (where serializer stores it)
+    usage = get_in(message, ["metadata", "usage"])
+    assigns = assigns |> assign(:message, message) |> assign(:usage, usage)
 
     ~H"""
     <div class="chat chat-end">
@@ -308,7 +311,7 @@ defmodule PlayWeb.GraphLive do
         Assistant
       </div>
       <div class="chat-bubble chat-bubble-neutral text-sm">
-        <div class="whitespace-pre-wrap">{@message["content"]}</div>
+        <div class="whitespace-pre-wrap">{extract_text_content(@message["content"])}</div>
 
         <%!-- Tool Calls --%>
         <div :if={@message["tool_calls"] && @message["tool_calls"] != []} class="mt-2">
@@ -316,8 +319,8 @@ defmodule PlayWeb.GraphLive do
         </div>
 
         <%!-- Token Usage --%>
-        <div :if={@message["usage"]} class="mt-2 pt-2 border-t border-base-content/20">
-          {render_token_usage(assigns, @message["usage"])}
+        <div :if={@usage} class="mt-2 pt-2 border-t border-base-content/20">
+          {render_token_usage(assigns, @usage)}
         </div>
       </div>
     </div>
@@ -350,7 +353,7 @@ defmodule PlayWeb.GraphLive do
         {String.capitalize(@message["role"] || "unknown")}
       </div>
       <div class="chat-bubble text-sm">
-        {@message["content"]}
+        {extract_text_content(@message["content"])}
       </div>
     </div>
     """
@@ -382,20 +385,28 @@ defmodule PlayWeb.GraphLive do
 
   # Render token usage stats
   defp render_token_usage(assigns, usage) when is_map(usage) do
-    assigns = assign(assigns, :usage, usage)
+    input_tokens = usage["input"] || 0
+    output_tokens = usage["output"] || 0
+    total_tokens = input_tokens + output_tokens
+
+    assigns =
+      assigns
+      |> assign(:input_tokens, input_tokens)
+      |> assign(:output_tokens, output_tokens)
+      |> assign(:total_tokens, total_tokens)
 
     ~H"""
     <div class="flex flex-wrap gap-2 text-xs">
       <span class="badge badge-xs badge-ghost">
         <.icon name="hero-arrow-down-tray" class="w-2 h-2 mr-1" />
-        {@usage["input"] || 0} in
+        {@input_tokens} in
       </span>
       <span class="badge badge-xs badge-ghost">
         <.icon name="hero-arrow-up-tray" class="w-2 h-2 mr-1" />
-        {@usage["output"] || 0} out
+        {@output_tokens} out
       </span>
       <span class="badge badge-xs badge-info">
-        Σ {@usage["total"] || 0}
+        Σ {@total_tokens}
       </span>
     </div>
     """
@@ -423,7 +434,28 @@ defmodule PlayWeb.GraphLive do
     end
   end
 
+  defp truncate_content(content, max_length) when is_list(content) do
+    truncate_content(extract_text_content(content), max_length)
+  end
+
   defp truncate_content(content, _), do: inspect(content)
+
+  # Extract text content from serialized message content
+  # Content can be a string, a list of ContentPart maps, or nil
+  defp extract_text_content(nil), do: ""
+  defp extract_text_content(content) when is_binary(content), do: content
+
+  defp extract_text_content(content) when is_list(content) do
+    content
+    |> Enum.filter(fn
+      %{"type" => "text"} -> true
+      _ -> false
+    end)
+    |> Enum.map(fn part -> part["content"] || "" end)
+    |> Enum.join("\n\n")
+  end
+
+  defp extract_text_content(content), do: inspect(content)
 
   # ============================================================================
   # Event Handlers
@@ -434,7 +466,11 @@ defmodule PlayWeb.GraphLive do
   def handle_event("hook_ready", _params, socket) do
     Logger.info("Hook ready, registering #{length(socket.assigns.node_types)} node types")
 
-    socket = push_event(socket, "register_node_types", %{types: socket.assigns.node_types})
+    # Inject dynamic conversation options into node types
+    node_types =
+      inject_conversation_options(socket.assigns.node_types, socket.assigns.current_scope.profile)
+
+    socket = push_event(socket, "register_node_types", %{types: node_types})
 
     # If we have a saved graph, load it; otherwise create sample nodes
     socket =
@@ -656,11 +692,230 @@ defmodule PlayWeb.GraphLive do
   def handle_event("execute_workflow", %{"graph" => graph}, socket) do
     Logger.info("Starting workflow execution with #{length(graph["nodes"] || [])} nodes")
 
-    # Start async execution with message inputs
+    # Start async execution with message inputs and user profile
     message_inputs = socket.assigns.message_inputs
-    WorkflowExecutor.execute_async(graph, self(), message_inputs: message_inputs)
+    user_profile = socket.assigns.current_scope.profile
+
+    WorkflowExecutor.execute_async(graph, self(),
+      message_inputs: message_inputs,
+      user_profile: user_profile
+    )
 
     {:noreply, socket}
+  end
+
+  # Handle manual save conversation button click
+  @impl true
+  def handle_event("save_conversation_manual", params, socket) do
+    %{
+      "node_id" => node_id,
+      "conversation_id" => conversation_id,
+      "new_name" => new_name,
+      "mode" => mode
+    } = params
+
+    user_profile = socket.assigns.current_scope.profile
+
+    Logger.info(
+      "Manual save conversation: node=#{node_id}, conv=#{conversation_id}, mode=#{mode}"
+    )
+
+    # Get the current graph to find connected messages
+    graph = socket.assigns.graph
+    execution_outputs = socket.assigns.execution_outputs
+
+    # Find the save node and its input connection (use stored execution outputs)
+    messages = get_connected_messages(graph, node_id, execution_outputs)
+
+    if messages == [] do
+      Logger.warning("No messages found for save conversation node #{node_id}")
+
+      socket =
+        put_flash(socket, :error, "No messages to save. Connect a messages source to the node.")
+
+      {:noreply, socket}
+    else
+      # Serialize and save
+      serialized = Play.LangChain.MessageSerializer.serialize_messages(messages)
+
+      result =
+        if conversation_id == "__new__" do
+          Play.Conversations.create_conversation(user_profile, %{
+            name: new_name,
+            messages: serialized
+          })
+        else
+          case Play.Conversations.get_conversation(user_profile, conversation_id) do
+            nil ->
+              {:error, :not_found}
+
+            conversation ->
+              final_messages =
+                case mode do
+                  "append" ->
+                    existing =
+                      Play.LangChain.MessageSerializer.deserialize_messages(conversation.messages)
+
+                    existing ++ messages
+
+                  _ ->
+                    messages
+                end
+
+              serialized = Play.LangChain.MessageSerializer.serialize_messages(final_messages)
+              Play.Conversations.update_conversation(conversation, %{messages: serialized})
+          end
+        end
+
+      case result do
+        {:ok, conversation} ->
+          Logger.info(
+            "Saved conversation '#{conversation.name}' with #{length(messages)} messages"
+          )
+
+          socket =
+            socket
+            |> put_flash(:info, "Conversation saved!")
+            |> push_conversation_options_update()
+
+          {:noreply, socket}
+
+        {:error, :not_found} ->
+          socket = put_flash(socket, :error, "Conversation not found")
+          {:noreply, socket}
+
+        {:error, changeset} ->
+          Logger.error("Failed to save conversation: #{inspect(changeset.errors)}")
+          socket = put_flash(socket, :error, "Failed to save conversation")
+          {:noreply, socket}
+      end
+    end
+  end
+
+  # Push updated conversation options to the JS hook
+  defp push_conversation_options_update(socket) do
+    conversations = Play.Conversations.list_conversations(socket.assigns.current_scope.profile)
+
+    load_values =
+      Enum.map(conversations, fn conv ->
+        %{value: conv.id, label: conv.name}
+      end)
+
+    save_values =
+      [%{value: "__new__", label: "Create new..."}] ++
+        Enum.map(conversations, fn conv ->
+          %{value: conv.id, label: conv.name}
+        end)
+
+    push_event(socket, "update_conversation_options", %{
+      load_values: load_values,
+      save_values: save_values
+    })
+  end
+
+  # Get messages from the node connected to a save conversation node's input
+  # Uses stored execution outputs first, falls back to node properties
+  defp get_connected_messages(graph, save_node_id, execution_outputs) do
+    graph_data = if is_struct(graph, Play.Graph), do: graph.data, else: graph
+    nodes = graph_data["nodes"] || []
+    links = graph_data["links"] || []
+
+    # Find the link connected to the save node's input (slot 0)
+    connected_link =
+      Enum.find(links, fn link ->
+        [_link_id, _from_node, _from_slot, to_node, to_slot | _rest] = link
+        to_node == save_node_id and to_slot == 0
+      end)
+
+    case connected_link do
+      nil ->
+        []
+
+      [_link_id, from_node_id, from_slot | _rest] ->
+        # First, try to get messages from stored execution outputs
+        case Map.get(execution_outputs, from_node_id) do
+          %{^from_slot => messages} when is_list(messages) ->
+            messages
+
+          _ ->
+            # Fall back to node properties
+            source_node = Enum.find(nodes, fn node -> node["id"] == from_node_id end)
+
+            case source_node do
+              nil ->
+                []
+
+              %{"properties" => props} ->
+                # Try to get messages from various property names
+                messages =
+                  props["_messages"] ||
+                    props["conversation_history"] ||
+                    props["messages_out"] ||
+                    []
+
+                if is_list(messages) do
+                  Play.LangChain.MessageSerializer.deserialize_messages(messages)
+                else
+                  []
+                end
+
+              _ ->
+                []
+            end
+        end
+    end
+  end
+
+  # Inject conversation options into node types that have dynamic_source: "conversations"
+  defp inject_conversation_options(node_types, user_profile) do
+    conversations = Play.Conversations.list_conversations(user_profile)
+
+    # Build options for both load and save nodes
+    load_values =
+      Enum.map(conversations, fn conv ->
+        %{value: conv.id, label: conv.name}
+      end)
+
+    save_values =
+      [%{value: "__new__", label: "Create new..."}] ++
+        Enum.map(conversations, fn conv ->
+          %{value: conv.id, label: conv.name}
+        end)
+
+    Enum.map(node_types, fn node_type ->
+      case node_type do
+        %{type: "load_conversation", widgets: widgets} ->
+          updated_widgets =
+            Enum.map(widgets, fn widget ->
+              case widget do
+                %{type: "combo", options: %{dynamic_source: "conversations"}} ->
+                  %{widget | options: Map.put(widget.options, :values, load_values)}
+
+                _ ->
+                  widget
+              end
+            end)
+
+          %{node_type | widgets: updated_widgets}
+
+        %{type: "save_conversation", widgets: widgets} ->
+          updated_widgets =
+            Enum.map(widgets, fn widget ->
+              case widget do
+                %{type: "combo", options: %{dynamic_source: "conversations"}} ->
+                  %{widget | options: Map.put(widget.options, :values, save_values)}
+
+                _ ->
+                  widget
+              end
+            end)
+
+          %{node_type | widgets: updated_widgets}
+
+        _ ->
+          node_type
+      end
+    end)
   end
 
   # ============================================================================
@@ -678,6 +933,9 @@ defmodule PlayWeb.GraphLive do
   def handle_info({:node_completed, node_id, result}, socket) do
     Logger.debug("Node #{node_id} completed with result: #{inspect(result, limit: 50)}")
 
+    # Store execution outputs for later use (e.g., manual save)
+    execution_outputs = Map.put(socket.assigns.execution_outputs, node_id, result)
+
     # Extract the primary output value (slot 0) for display nodes
     output_value =
       case result do
@@ -686,7 +944,11 @@ defmodule PlayWeb.GraphLive do
         _ -> nil
       end
 
-    socket = push_event(socket, "node_completed", %{node_id: node_id, output: output_value})
+    socket =
+      socket
+      |> assign(:execution_outputs, execution_outputs)
+      |> push_event("node_completed", %{node_id: node_id, output: output_value})
+
     {:noreply, socket}
   end
 

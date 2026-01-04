@@ -55,11 +55,10 @@ defmodule Play.WorkflowExecutor do
   """
   def execute_async(graph, caller_pid, opts \\ [])
       when is_map(graph) and is_pid(caller_pid) do
-    message_inputs = Keyword.get(opts, :message_inputs, %{})
-
     spawn(fn ->
       try do
-        results = execute(graph, caller_pid, message_inputs: message_inputs)
+        # Forward all options to execute
+        results = execute(graph, caller_pid, opts)
         send(caller_pid, {:execution_complete, results})
       rescue
         e ->
@@ -86,16 +85,17 @@ defmodule Play.WorkflowExecutor do
     nodes = graph["nodes"] || []
     links = graph["links"] || []
     message_inputs = Keyword.get(opts, :message_inputs, %{})
+    user_profile = Keyword.get(opts, :user_profile)
 
     if Enum.empty?(nodes) do
       Logger.info("Empty workflow, nothing to execute")
       %{}
     else
-      execute_workflow(nodes, links, caller_pid, message_inputs)
+      execute_workflow(nodes, links, caller_pid, message_inputs, user_profile)
     end
   end
 
-  defp execute_workflow(nodes, links, caller_pid, message_inputs) do
+  defp execute_workflow(nodes, links, caller_pid, message_inputs, user_profile) do
     # Build all required data structures
     node_map = Map.new(nodes, fn node -> {node["id"], node} end)
     input_links = build_input_links(links)
@@ -114,14 +114,14 @@ defmodule Play.WorkflowExecutor do
       "Executing workflow with #{total_nodes} nodes, #{length(root_nodes)} root nodes: #{inspect(root_nodes)}"
     )
 
-    # Initialize execution state with message_inputs in context
+    # Initialize execution state with message_inputs and user_profile in context
     state = %__MODULE__{
       node_map: node_map,
       input_links: input_links,
       dependents: dependents,
       pending_deps: pending_deps,
       outputs: %{},
-      context: %{caller_pid: caller_pid, message_inputs: message_inputs},
+      context: %{caller_pid: caller_pid, message_inputs: message_inputs, user_profile: user_profile},
       caller_pid: caller_pid,
       total_nodes: total_nodes,
       completed_count: 0,

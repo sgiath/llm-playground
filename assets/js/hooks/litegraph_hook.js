@@ -169,6 +169,46 @@ const LitegraphHook = {
       }, 100); // Give a bit more time for registration
     });
 
+    // Update conversation options in all load/save conversation nodes
+    this.handleEvent("update_conversation_options", (payload) => {
+      const { load_values, save_values } = payload;
+      console.log("Updating conversation options:", { load_values, save_values });
+
+      // Update all nodes that have conversation_id widgets
+      this.graph._nodes.forEach((node) => {
+        if (node.type === "load_conversation" || node.type === "save_conversation") {
+          const values = node.type === "load_conversation" ? load_values : save_values;
+          const propName = "conversation_id";
+
+          // Update the combo mapping
+          node["_combo_mapping_" + propName] = values;
+
+          // Find and update the widget
+          const widget = node.widgets?.find(
+            (w) => w.name === "Conversation" || w.name === propName
+          );
+          if (widget) {
+            // Update widget options with labels
+            widget.options.values = values.map((opt) => opt.label);
+
+            // If current value is not in the list, update to first option
+            const currentValue = node.properties[propName];
+            const found = values.find((opt) => opt.value === currentValue);
+            if (!found && values.length > 0) {
+              widget.value = values[0].label;
+              node.properties[propName] = values[0].value;
+            } else if (found) {
+              widget.value = found.label;
+            }
+          }
+        }
+      });
+
+      // Redraw the canvas
+      this.graphCanvas.setDirty(true, true);
+      this.graphCanvas.draw(true, true);
+    });
+
     // Clear the graph
     this.handleEvent("clear_graph", () => {
       this.graph.clear();
@@ -489,22 +529,80 @@ const LitegraphHook = {
                 // Save graph state to database
                 hook.pushGraphState("property_changed");
                 console.log(`Cleared conversation history for node ${this.id}`);
+              } else if (w.callback === "saveConversation") {
+                // Manual save conversation to database
+                const nodeId = this.id;
+                const conversationId = this.properties.conversation_id || "__new__";
+                const newName = this.properties.new_name || "New Conversation";
+                const mode = this.properties.mode || "override";
+                
+                // Send save request to server
+                hook.pushEvent("save_conversation_manual", {
+                  node_id: nodeId,
+                  conversation_id: conversationId,
+                  new_name: newName,
+                  mode: mode,
+                });
+                console.log(`Manual save conversation triggered for node ${nodeId}`);
               }
             };
             this.addWidget("button", w.name, null, buttonCallback, w.options || {});
           } else {
             const callback = (v) => {
-              this.properties[w.property || w.name] = v;
+              // For combo widgets with value/label pairs, v is the label
+              // We need to find the actual value
+              let actualValue = v;
+              if (w.type === "combo" && w.options && w.options.values) {
+                const values = w.options.values;
+                if (values.length > 0 && typeof values[0] === "object" && values[0].label) {
+                  const found = values.find((opt) => opt.label === v);
+                  if (found) {
+                    actualValue = found.value;
+                  }
+                }
+              }
+              
+              this.properties[w.property || w.name] = actualValue;
               // Notify server of property change
               hook.pushEvent("property_changed", {
                 node_id: this.id,
                 property: w.property || w.name,
-                value: v,
+                value: actualValue,
               });
               // Save graph state to database
               hook.pushGraphState("property_changed");
             };
-            this.addWidget(w.type, w.name, w.default, callback, w.options || {});
+            
+            // Transform options for combo widgets with value/label pairs
+            let widgetOptions = w.options || {};
+            if (w.type === "combo" && widgetOptions.values) {
+              const values = widgetOptions.values;
+              if (values.length > 0 && typeof values[0] === "object" && values[0].label) {
+                // Convert to array of labels for display
+                widgetOptions = {
+                  ...widgetOptions,
+                  values: values.map((opt) => opt.label),
+                };
+                // Store the original mapping for lookup
+                this["_combo_mapping_" + (w.property || w.name)] = values;
+              }
+            }
+            
+            // Get display value (label) for combo with value/label pairs
+            let defaultValue = w.default;
+            if (w.type === "combo" && w.options && w.options.values) {
+              const values = w.options.values;
+              if (values.length > 0 && typeof values[0] === "object" && values[0].label) {
+                const found = values.find((opt) => opt.value === w.default);
+                if (found) {
+                  defaultValue = found.label;
+                } else if (values.length > 0) {
+                  defaultValue = values[0].label;
+                }
+              }
+            }
+            
+            this.addWidget(w.type, w.name, defaultValue, callback, widgetOptions);
           }
         });
       }
@@ -539,7 +637,18 @@ const LitegraphHook = {
         const propName = wDef.property || wDef.name;
         const widget = this.widgets.find((w) => w.name === wDef.name);
         if (widget && this.properties[propName] !== undefined) {
-          widget.value = this.properties[propName];
+          let displayValue = this.properties[propName];
+          
+          // For combo widgets with value/label pairs, convert value to label
+          const mapping = this["_combo_mapping_" + propName];
+          if (mapping && Array.isArray(mapping)) {
+            const found = mapping.find((opt) => opt.value === displayValue);
+            if (found) {
+              displayValue = found.label;
+            }
+          }
+          
+          widget.value = displayValue;
         }
       });
     };

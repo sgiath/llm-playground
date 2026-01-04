@@ -28,7 +28,6 @@ defmodule Play.Web.Live.Nodes do
 
       # Agent nodes
       stateless_agent_node(),
-      stateful_agent_node(),
 
       # Input nodes
       text_input_node(),
@@ -50,7 +49,11 @@ defmodule Play.Web.Live.Nodes do
 
       # Tool nodes
       web_search_tool_node(),
-      tools_combiner_node()
+      tools_combiner_node(),
+
+      # Storage nodes
+      load_conversation_node(),
+      save_conversation_node()
     ]
   end
 
@@ -261,7 +264,7 @@ defmodule Play.Web.Live.Nodes do
   defp stateless_agent_node do
     %{
       type: "stateless_agent",
-      title: "Stateless Agent",
+      title: "Agent",
       description:
         "LLM Agent that processes messages with a system prompt and optional tools. Does not retain conversation history between runs.",
       category: "agent",
@@ -320,82 +323,6 @@ defmodule Play.Web.Live.Nodes do
       return { 
         0: this.properties._last_response || '',
         1: this.properties._messages_out || messages,
-        2: this.properties._tool_calls || []
-      };
-      """
-    }
-  end
-
-  defp stateful_agent_node do
-    %{
-      type: "stateful_agent",
-      title: "Stateful Agent",
-      description:
-        "LLM Agent that maintains conversation history across workflow runs. Each run appends to the conversation.",
-      category: "agent",
-      inputs: [
-        %{name: "llm_config", type: "llm_config"},
-        %{name: "system", type: "text"},
-        %{name: "user_message", type: "message"},
-        %{name: "tools", type: "tools"}
-      ],
-      outputs: [
-        %{name: "response", type: "text"},
-        %{name: "messages_out", type: "messages"},
-        %{name: "tool_calls", type: "tool_calls"}
-      ],
-      properties: [
-        %{name: "system_prompt", default: "You are a helpful assistant."},
-        %{name: "stream", default: false},
-        %{name: "conversation_history", default: []}
-      ],
-      widgets: [
-        %{
-          type: "text",
-          name: "System Prompt",
-          property: "system_prompt",
-          default: "You are a helpful assistant.",
-          options: %{multiline: true}
-        },
-        %{
-          type: "toggle",
-          name: "Stream",
-          property: "stream",
-          default: false
-        },
-        %{
-          type: "button",
-          name: "Clear History",
-          callback: "clearConversationHistory"
-        }
-      ],
-      # Hide "System Prompt" widget when "system" input is connected
-      hide_widget_on_input: %{"system" => "System Prompt"},
-      size: [280, 170],
-      color: "#7c3aed",
-      bgcolor: "#1e1e2f",
-      execute_code: """
-      const llm_config = inputs[0];
-      const system_override = inputs[1];
-      const user_message = inputs[2];
-      const tools = inputs[3] || [];
-      const system_prompt = system_override || properties.system_prompt;
-      const conversation_history = properties.conversation_history || [];
-
-      // Store config for server-side execution
-      this.properties._pending_execution = {
-        llm_config: llm_config,
-        user_message: user_message,
-        tools: tools,
-        system_prompt: system_prompt,
-        stream: properties.stream,
-        conversation_history: conversation_history
-      };
-
-      // Return current stored response (will be updated by server)
-      return { 
-        0: this.properties._last_response || '',
-        1: this.properties.conversation_history || [],
         2: this.properties._tool_calls || []
       };
       """
@@ -646,33 +573,41 @@ defmodule Play.Web.Live.Nodes do
     %{
       type: "messages_combiner",
       title: "Messages",
-      description: "Combines multiple messages into an array. Right-click to add/remove inputs.",
+      description:
+        "Combines messages into an array. First input accepts an existing messages array to append to. Right-click to add/remove message inputs.",
       category: "utility",
       inputs: [
+        %{name: "messages", type: "messages"},
         %{name: "msg1", type: "message"}
       ],
       outputs: [%{name: "messages", type: "messages"}],
       properties: [%{name: "input_count", default: 1}],
-      size: [160, 60],
+      size: [160, 80],
       color: "#6366f1",
       bgcolor: "#1a1a2e",
       # Enable dynamic inputs - the JS hook will add menu options to add/remove
+      # Starting from slot 1 (slot 0 is reserved for messages input)
       dynamic_inputs: %{
         type: "message",
         name_prefix: "msg",
         min: 1,
         max: 20,
+        start_slot: 1,
         # Automatically add a new input when the last one is connected
         auto_add: true
       },
       execute_code: """
-      const messages = [];
-      for (let i = 0; i < inputs.length; i++) {
+      // First input (slot 0) is the messages array to append to
+      const baseMessages = Array.isArray(inputs[0]) ? inputs[0] : [];
+      const result = [...baseMessages];
+
+      // Remaining inputs are individual messages
+      for (let i = 1; i < inputs.length; i++) {
         if (inputs[i] && typeof inputs[i] === 'object' && inputs[i].role && inputs[i].content) {
-          messages.push(inputs[i]);
+          result.push(inputs[i]);
         }
       }
-      return messages;
+      return result;
       """
     }
   end
@@ -898,6 +833,123 @@ defmodule Play.Web.Live.Nodes do
         }
       }
       return tools;
+      """
+    }
+  end
+
+  # ============================================================================
+  # Storage Nodes
+  # ============================================================================
+
+  defp load_conversation_node do
+    %{
+      type: "load_conversation",
+      title: "Load Conversation",
+      description:
+        "Load conversation history from the database. Select a saved conversation to restore its messages.",
+      category: "storage",
+      inputs: [],
+      outputs: [%{name: "messages", type: "messages"}],
+      properties: [
+        %{name: "conversation_id", default: nil}
+      ],
+      widgets: [
+        %{
+          type: "combo",
+          name: "Conversation",
+          property: "conversation_id",
+          default: nil,
+          options: %{
+            values: [],
+            # Dynamic values will be populated from DB
+            dynamic: true,
+            dynamic_source: "conversations"
+          }
+        }
+      ],
+      size: [240, 80],
+      color: "#06b6d4",
+      bgcolor: "#1a1a2e",
+      execute_code: """
+      // Server-side execution will fetch from database
+      return this.properties._loaded_messages || [];
+      """
+    }
+  end
+
+  defp save_conversation_node do
+    %{
+      type: "save_conversation",
+      title: "Save Conversation",
+      description:
+        "Save conversation history to the database. Choose to create a new conversation or update an existing one.",
+      category: "storage",
+      inputs: [%{name: "messages", type: "messages"}],
+      outputs: [],
+      properties: [
+        %{name: "conversation_id", default: "__new__"},
+        %{name: "new_name", default: "New Conversation"},
+        %{name: "mode", default: "override"},
+        %{name: "auto_save", default: false}
+      ],
+      widgets: [
+        %{
+          type: "combo",
+          name: "Conversation",
+          property: "conversation_id",
+          default: "__new__",
+          options: %{
+            values: ["__new__"],
+            # Dynamic values will be populated from DB
+            dynamic: true,
+            dynamic_source: "conversations",
+            include_new_option: true
+          }
+        },
+        %{
+          type: "text",
+          name: "Name",
+          property: "new_name",
+          default: "New Conversation"
+        },
+        %{
+          type: "combo",
+          name: "Mode",
+          property: "mode",
+          default: "override",
+          options: %{
+            values: ["override", "append"]
+          }
+        },
+        %{
+          type: "toggle",
+          name: "Save automatically",
+          property: "auto_save",
+          default: false
+        },
+        %{
+          type: "button",
+          name: "Save",
+          callback: "saveConversation"
+        }
+      ],
+      # Hide "Name" widget when not creating new conversation
+      hide_widget_on_property: %{"conversation_id" => %{widget: "Name", hide_when_not: "__new__"}},
+      # Hide "Save" button when auto_save is enabled
+      hide_widget_on_property_true: %{"auto_save" => "Save"},
+      size: [260, 180],
+      color: "#06b6d4",
+      bgcolor: "#1a1a2e",
+      execute_code: """
+      const messages = inputs[0] || [];
+      // Store for server-side processing
+      this.properties._pending_save = {
+        messages: messages,
+        conversation_id: properties.conversation_id,
+        new_name: properties.new_name,
+        mode: properties.mode,
+        auto_save: properties.auto_save
+      };
       """
     }
   end
