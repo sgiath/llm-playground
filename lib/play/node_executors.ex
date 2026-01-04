@@ -193,11 +193,9 @@ defmodule Play.NodeExecutors do
   # Tool Nodes
   # ============================================================================
 
-  # Web search tool node - creates a LangChain Function for web search
+  # Web search tool node - creates a LangChain Function for web search using SearxNG
   def execute("tool/web_search_tool", _node, _inputs, properties, _context) do
-    provider = Map.get(properties, "provider", "tavily")
     max_results = Map.get(properties, "max_results", 5)
-    search_depth = Map.get(properties, "search_depth", "basic")
 
     function =
       Function.new!(%{
@@ -208,7 +206,7 @@ defmodule Play.NodeExecutors do
           FunctionParam.new!(%{name: "query", type: :string, required: true})
         ],
         function: fn %{"query" => query}, _context ->
-          execute_web_search(query, provider, max_results, search_depth)
+          execute_searxng_search(query, max_results)
         end
       })
 
@@ -238,8 +236,11 @@ defmodule Play.NodeExecutors do
     messages = Map.get(inputs, 2, [])
     tools = Map.get(inputs, 3, [])
 
-    system_prompt =
+    base_system_prompt =
       system_override || Map.get(properties, "system_prompt", "You are a helpful assistant.")
+
+    # Enhance system prompt with tool descriptions when tools are connected
+    system_prompt = build_system_prompt_with_tools(base_system_prompt, tools)
 
     stream = Map.get(properties, "stream", true)
 
@@ -567,6 +568,38 @@ defmodule Play.NodeExecutors do
     end
   end
 
+  # Build system prompt with tool descriptions when tools are available
+  defp build_system_prompt_with_tools(base_prompt, nil), do: base_prompt
+  defp build_system_prompt_with_tools(base_prompt, []), do: base_prompt
+
+  defp build_system_prompt_with_tools(base_prompt, tools) when is_list(tools) do
+    tool_descriptions =
+      tools
+      |> Enum.map(fn
+        %LangChain.Function{name: name, description: description} ->
+          "- #{name}: #{description}"
+
+        _ ->
+          nil
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("\n")
+
+    if tool_descriptions == "" do
+      base_prompt
+    else
+      """
+      #{base_prompt}
+
+      You have access to the following tools that you can use to help answer questions:
+
+      #{tool_descriptions}
+
+      Use these tools when appropriate to provide accurate and up-to-date information.
+      """
+    end
+  end
+
   # Extract text content from a LangChain Message
   # Content can be a string, a list of ContentParts, or nil
   defp extract_message_content(nil), do: ""
@@ -585,52 +618,26 @@ defmodule Play.NodeExecutors do
 
   defp extract_message_content(_), do: ""
 
-  defp execute_web_search(query, provider, max_results, _search_depth) do
-    Logger.info("Executing web search: #{query} via #{provider}")
+  defp execute_searxng_search(query, max_results) do
+    Logger.info("Executing web search via SearxNG: #{query}")
 
-    case provider do
-      "tavily" ->
-        execute_tavily_search(query, max_results)
+    url = "https://search.sgiath.dev/search"
 
-      _ ->
-        {:ok,
-         "Web search for '#{query}' would be performed via #{provider}. " <>
-           "Configure API keys for actual results."}
-    end
-  end
+    case Req.get(url, params: [q: query, format: "json"]) do
+      {:ok, %{status: 200, body: body}} ->
+        # Pass the raw JSON results to the LLM, limited to max_results
+        results =
+          body
+          |> Map.update("results", [], &Enum.take(&1, max_results))
+          |> Jason.encode!()
 
-  defp execute_tavily_search(query, max_results) do
-    api_key = System.get_env("TAVILY_API_KEY")
+        {:ok, results}
 
-    if api_key do
-      case Req.post("https://api.tavily.com/search",
-             json: %{
-               api_key: api_key,
-               query: query,
-               max_results: max_results,
-               include_answer: true
-             }
-           ) do
-        {:ok, %{status: 200, body: body}} ->
-          answer = body["answer"] || ""
+      {:ok, %{status: status, body: body}} ->
+        {:error, "SearxNG API error (#{status}): #{inspect(body)}"}
 
-          results =
-            (body["results"] || [])
-            |> Enum.map(fn r -> "- #{r["title"]}: #{r["content"]}" end)
-            |> Enum.join("\n")
-
-          {:ok, "#{answer}\n\nSources:\n#{results}"}
-
-        {:ok, %{status: status, body: body}} ->
-          {:error, "Tavily API error (#{status}): #{inspect(body)}"}
-
-        {:error, reason} ->
-          {:error, "Tavily request failed: #{inspect(reason)}"}
-      end
-    else
-      {:ok,
-       "Web search for '#{query}' - TAVILY_API_KEY not configured. " <>
-         "Set the environment variable to enable web search."}
+      {:error, reason} ->
+        {:error, "SearxNG request failed: #{inspect(reason)}"}
     end
   end
 end

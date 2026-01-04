@@ -740,42 +740,22 @@ defmodule Play.Web.Live.Nodes do
     %{
       type: "web_search_tool",
       title: "Web Search",
-      description: "Defines a web search tool for the Agent. The LLM decides when to call it.",
+      description: "Web search tool using SearxNG. The LLM decides when to call it.",
       category: "tool",
       outputs: [%{name: "tool", type: "tool"}],
       properties: [
-        %{name: "provider", default: "tavily"},
-        %{name: "max_results", default: 5},
-        %{name: "search_depth", default: "basic"}
+        %{name: "max_results", default: 5}
       ],
       widgets: [
-        %{
-          type: "combo",
-          name: "Provider",
-          property: "provider",
-          default: "tavily",
-          options: %{
-            values: ["tavily", "serper", "brave", "duckduckgo", "exa"]
-          }
-        },
         %{
           type: "number",
           name: "Max Results",
           property: "max_results",
           default: 5,
           options: %{min: 1, max: 20, step: 1}
-        },
-        %{
-          type: "combo",
-          name: "Search Depth",
-          property: "search_depth",
-          default: "basic",
-          options: %{
-            values: ["basic", "advanced"]
-          }
         }
       ],
-      size: [200, 110],
+      size: [200, 70],
       color: "#ec4899",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -796,9 +776,7 @@ defmodule Play.Web.Live.Nodes do
           }
         },
         _config: {
-          provider: properties.provider,
-          max_results: properties.max_results,
-          search_depth: properties.search_depth
+          max_results: properties.max_results
         }
       };
       """
@@ -809,7 +787,8 @@ defmodule Play.Web.Live.Nodes do
     %{
       type: "tools_combiner",
       title: "Tools",
-      description: "Combines multiple tools into an array. Right-click to add/remove inputs.",
+      description:
+        "Combines multiple tools into an array. Right-click to add/remove tool inputs.",
       category: "tool",
       inputs: [
         %{name: "tool1", type: "tool"}
@@ -819,11 +798,16 @@ defmodule Play.Web.Live.Nodes do
       size: [160, 60],
       color: "#ec4899",
       bgcolor: "#1a1a2e",
+      # Enable dynamic inputs - the JS hook will add menu options to add/remove
+      # Starting from slot 0 (no reserved slots)
       dynamic_inputs: %{
         type: "tool",
         name_prefix: "tool",
         min: 1,
-        max: 10
+        max: 10,
+        start_slot: 0,
+        # Automatically add a new input when the last one is connected
+        auto_add: true
       },
       execute_code: """
       const tools = [];

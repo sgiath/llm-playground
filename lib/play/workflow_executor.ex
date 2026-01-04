@@ -121,7 +121,11 @@ defmodule Play.WorkflowExecutor do
       dependents: dependents,
       pending_deps: pending_deps,
       outputs: %{},
-      context: %{caller_pid: caller_pid, message_inputs: message_inputs, user_profile: user_profile},
+      context: %{
+        caller_pid: caller_pid,
+        message_inputs: message_inputs,
+        user_profile: user_profile
+      },
       caller_pid: caller_pid,
       total_nodes: total_nodes,
       completed_count: 0,

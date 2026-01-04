@@ -172,12 +172,19 @@ const LitegraphHook = {
     // Update conversation options in all load/save conversation nodes
     this.handleEvent("update_conversation_options", (payload) => {
       const { load_values, save_values } = payload;
-      console.log("Updating conversation options:", { load_values, save_values });
+      console.log("Updating conversation options:", {
+        load_values,
+        save_values,
+      });
 
       // Update all nodes that have conversation_id widgets
       this.graph._nodes.forEach((node) => {
-        if (node.type === "load_conversation" || node.type === "save_conversation") {
-          const values = node.type === "load_conversation" ? load_values : save_values;
+        if (
+          node.type === "load_conversation" ||
+          node.type === "save_conversation"
+        ) {
+          const values =
+            node.type === "load_conversation" ? load_values : save_values;
           const propName = "conversation_id";
 
           // Update the combo mapping
@@ -239,7 +246,9 @@ const LitegraphHook = {
           node.properties[key] = value;
           // Update widget if exists
           if (node.widgets) {
-            const widget = node.widgets.find((w) => w.property === key || w.name === key);
+            const widget = node.widgets.find(
+              (w) => w.property === key || w.name === key
+            );
             if (widget) widget.value = value;
           }
         });
@@ -299,7 +308,7 @@ const LitegraphHook = {
     // Streaming delta from Agent nodes - update display in real-time
     this.handleEvent("stream_delta", (payload) => {
       const { node_id, content } = payload;
-      
+
       // Accumulate streaming content
       const currentContent = this.streamingContent.get(node_id) || "";
       const newContent = currentContent + (content || "");
@@ -328,7 +337,11 @@ const LitegraphHook = {
         }
 
         // Also update the node's own display if it's a Display node
-        if (node.type === "output/display" && output !== null && output !== undefined) {
+        if (
+          node.type === "output/display" &&
+          output !== null &&
+          output !== undefined
+        ) {
           node.properties.value = output;
         }
 
@@ -340,7 +353,7 @@ const LitegraphHook = {
     this.handleEvent("node_error", (payload) => {
       const { node_id, reason } = payload;
       console.error(`Node ${node_id} error:`, reason);
-      
+
       const node = this.graph.getNodeById(node_id);
       if (node) {
         // Remove from executing
@@ -375,9 +388,11 @@ const LitegraphHook = {
     // Clear message input textareas
     this.handleEvent("clear_message_inputs", () => {
       // Find all message input textareas and clear them
-      document.querySelectorAll('textarea[id^="message-input-"]').forEach((textarea) => {
-        textarea.value = "";
-      });
+      document
+        .querySelectorAll('textarea[id^="message-input-"]')
+        .forEach((textarea) => {
+          textarea.value = "";
+        });
     });
   },
 
@@ -399,9 +414,13 @@ const LitegraphHook = {
           targetNode.properties.value = content;
           this.graphCanvas.setDirty(true, true);
         }
-        
+
         // Also check if target is an Agent node - update its response display
-        if (targetNode && (targetNode.type === "agent/stateless_agent" || targetNode.type === "agent/stateful_agent")) {
+        if (
+          targetNode &&
+          (targetNode.type === "agent/stateless_agent" ||
+            targetNode.type === "agent/stateful_agent")
+        ) {
           targetNode.properties._last_response = content;
         }
       }
@@ -532,10 +551,11 @@ const LitegraphHook = {
               } else if (w.callback === "saveConversation") {
                 // Manual save conversation to database
                 const nodeId = this.id;
-                const conversationId = this.properties.conversation_id || "__new__";
+                const conversationId =
+                  this.properties.conversation_id || "__new__";
                 const newName = this.properties.new_name || "New Conversation";
                 const mode = this.properties.mode || "override";
-                
+
                 // Send save request to server
                 hook.pushEvent("save_conversation_manual", {
                   node_id: nodeId,
@@ -543,10 +563,18 @@ const LitegraphHook = {
                   new_name: newName,
                   mode: mode,
                 });
-                console.log(`Manual save conversation triggered for node ${nodeId}`);
+                console.log(
+                  `Manual save conversation triggered for node ${nodeId}`
+                );
               }
             };
-            this.addWidget("button", w.name, null, buttonCallback, w.options || {});
+            this.addWidget(
+              "button",
+              w.name,
+              null,
+              buttonCallback,
+              w.options || {}
+            );
           } else {
             const callback = (v) => {
               // For combo widgets with value/label pairs, v is the label
@@ -554,14 +582,18 @@ const LitegraphHook = {
               let actualValue = v;
               if (w.type === "combo" && w.options && w.options.values) {
                 const values = w.options.values;
-                if (values.length > 0 && typeof values[0] === "object" && values[0].label) {
+                if (
+                  values.length > 0 &&
+                  typeof values[0] === "object" &&
+                  values[0].label
+                ) {
                   const found = values.find((opt) => opt.label === v);
                   if (found) {
                     actualValue = found.value;
                   }
                 }
               }
-              
+
               this.properties[w.property || w.name] = actualValue;
               // Notify server of property change
               hook.pushEvent("property_changed", {
@@ -572,12 +604,16 @@ const LitegraphHook = {
               // Save graph state to database
               hook.pushGraphState("property_changed");
             };
-            
+
             // Transform options for combo widgets with value/label pairs
             let widgetOptions = w.options || {};
             if (w.type === "combo" && widgetOptions.values) {
               const values = widgetOptions.values;
-              if (values.length > 0 && typeof values[0] === "object" && values[0].label) {
+              if (
+                values.length > 0 &&
+                typeof values[0] === "object" &&
+                values[0].label
+              ) {
                 // Convert to array of labels for display
                 widgetOptions = {
                   ...widgetOptions,
@@ -587,12 +623,16 @@ const LitegraphHook = {
                 this["_combo_mapping_" + (w.property || w.name)] = values;
               }
             }
-            
+
             // Get display value (label) for combo with value/label pairs
             let defaultValue = w.default;
             if (w.type === "combo" && w.options && w.options.values) {
               const values = w.options.values;
-              if (values.length > 0 && typeof values[0] === "object" && values[0].label) {
+              if (
+                values.length > 0 &&
+                typeof values[0] === "object" &&
+                values[0].label
+              ) {
                 const found = values.find((opt) => opt.value === w.default);
                 if (found) {
                   defaultValue = found.label;
@@ -601,8 +641,14 @@ const LitegraphHook = {
                 }
               }
             }
-            
-            this.addWidget(w.type, w.name, defaultValue, callback, widgetOptions);
+
+            this.addWidget(
+              w.type,
+              w.name,
+              defaultValue,
+              callback,
+              widgetOptions
+            );
           }
         });
       }
@@ -638,7 +684,7 @@ const LitegraphHook = {
         const widget = this.widgets.find((w) => w.name === wDef.name);
         if (widget && this.properties[propName] !== undefined) {
           let displayValue = this.properties[propName];
-          
+
           // For combo widgets with value/label pairs, convert value to label
           const mapping = this["_combo_mapping_" + propName];
           if (mapping && Array.isArray(mapping)) {
@@ -647,7 +693,7 @@ const LitegraphHook = {
               displayValue = found.label;
             }
           }
-          
+
           widget.value = displayValue;
         }
       });
@@ -660,11 +706,18 @@ const LitegraphHook = {
         if (!config) return;
 
         const currentCount = this.inputs ? this.inputs.length : 0;
+        // Generate readable label from prefix (e.g., "msg" -> "Message", "tool" -> "Tool")
+        const inputLabel =
+          config.name_prefix.charAt(0).toUpperCase() +
+          config.name_prefix
+            .slice(1)
+            .replace(/([A-Z])/g, " $1")
+            .trim();
 
         // Add "Add Input" option
         if (currentCount < config.max) {
           options.push({
-            content: "Add Message Input",
+            content: `Add ${inputLabel} Input`,
             callback: () => {
               const newIndex = currentCount + 1;
               const newName = `${config.name_prefix}${newIndex}`;
@@ -680,7 +733,7 @@ const LitegraphHook = {
         // Add "Remove Input" option
         if (currentCount > config.min) {
           options.push({
-            content: "Remove Message Input",
+            content: `Remove ${inputLabel} Input`,
             callback: () => {
               this.removeInput(currentCount - 1);
               this.properties.input_count = currentCount - 1;
@@ -752,7 +805,7 @@ const LitegraphHook = {
     // Since this version of LiteGraph doesn't support widget.hidden, we remove/add widgets
     const updateWidgetVisibility = function (node) {
       if (!node._hide_widget_on_input || !node.inputs) return;
-      
+
       // Initialize storage for removed widgets if not exists
       if (!node._removed_widgets) {
         node._removed_widgets = {};
@@ -763,14 +816,18 @@ const LitegraphHook = {
 
       for (const [inputName, widgetName] of Object.entries(mapping)) {
         // Find the input slot index by name
-        const inputIndex = node.inputs.findIndex((inp) => inp.name === inputName);
+        const inputIndex = node.inputs.findIndex(
+          (inp) => inp.name === inputName
+        );
         if (inputIndex === -1) continue;
 
         // Check if this input has a connection
         const isConnected = node.inputs[inputIndex].link !== null;
 
         // Check if widget currently exists
-        const widgetIndex = node.widgets ? node.widgets.findIndex((w) => w.name === widgetName) : -1;
+        const widgetIndex = node.widgets
+          ? node.widgets.findIndex((w) => w.name === widgetName)
+          : -1;
         const widgetExists = widgetIndex !== -1;
         const wasRemoved = node._removed_widgets[widgetName] !== undefined;
 
@@ -779,7 +836,7 @@ const LitegraphHook = {
           const widget = node.widgets[widgetIndex];
           node._removed_widgets[widgetName] = {
             widget: widget,
-            index: widgetIndex
+            index: widgetIndex,
           };
           node.widgets.splice(widgetIndex, 1);
           changed = true;
@@ -788,7 +845,10 @@ const LitegraphHook = {
           const stored = node._removed_widgets[widgetName];
           if (stored && stored.widget) {
             // Insert at original position or at end
-            const insertIndex = Math.min(stored.index, node.widgets ? node.widgets.length : 0);
+            const insertIndex = Math.min(
+              stored.index,
+              node.widgets ? node.widgets.length : 0
+            );
             if (!node.widgets) node.widgets = [];
             node.widgets.splice(insertIndex, 0, stored.widget);
             delete node._removed_widgets[widgetName];
@@ -918,7 +978,10 @@ const LitegraphHook = {
         const titleHeight = 30;
         const inputHeight = this.inputs ? this.inputs.length * 20 : 0;
         const contentHeight = lines.length * lineHeight;
-        const minHeight = Math.max(80, titleHeight + inputHeight + contentHeight + padding * 2);
+        const minHeight = Math.max(
+          80,
+          titleHeight + inputHeight + contentHeight + padding * 2
+        );
 
         // Resize node if needed
         if (Math.abs(this.size[1] - minHeight) > 5) {
@@ -1025,22 +1088,24 @@ const LitegraphHook = {
       }
 
       // Collect inputs with connection info
-      const inputs = node.inputs?.map((inp, i) => ({
-        name: inp.name,
-        type: inp.type,
-        slot: i,
-        connected: inp.link !== null,
-        link_id: inp.link
-      })) || [];
+      const inputs =
+        node.inputs?.map((inp, i) => ({
+          name: inp.name,
+          type: inp.type,
+          slot: i,
+          connected: inp.link !== null,
+          link_id: inp.link,
+        })) || [];
 
       // Collect outputs with connection info
-      const outputs = node.outputs?.map((out, i) => ({
-        name: out.name,
-        type: out.type,
-        slot: i,
-        connected: out.links && out.links.length > 0,
-        connection_count: out.links?.length || 0
-      })) || [];
+      const outputs =
+        node.outputs?.map((out, i) => ({
+          name: out.name,
+          type: out.type,
+          slot: i,
+          connected: out.links && out.links.length > 0,
+          connection_count: out.links?.length || 0,
+        })) || [];
 
       // Collect ALL properties including internal state
       const properties = { ...node.properties };
@@ -1061,7 +1126,7 @@ const LitegraphHook = {
         size: node.size,
         color: node.color,
         bgcolor: node.bgcolor,
-        pos: node.pos
+        pos: node.pos,
       });
     };
 
@@ -1073,10 +1138,19 @@ const LitegraphHook = {
     };
 
     // Track property changes via widget interaction
-    this.graphCanvas.onWidgetChanged = (name, value, oldValue, widget, node) => {
+    this.graphCanvas.onWidgetChanged = (
+      name,
+      value,
+      oldValue,
+      widget,
+      node
+    ) => {
       // If this node was in completed or executing state, reset its color
       // This indicates that the new config hasn't been tested yet
-      if (hook.completedNodes.has(node.id) || hook.executingNodes.has(node.id)) {
+      if (
+        hook.completedNodes.has(node.id) ||
+        hook.executingNodes.has(node.id)
+      ) {
         const original = hook.originalColors.get(node.id);
         if (original) {
           node.color = original.color;
@@ -1107,7 +1181,10 @@ const LitegraphHook = {
       const node = this.graph.getNodeById(node_id);
       if (node) {
         // Store current execution colors
-        executionColors.set(node_id, { color: node.color, bgcolor: node.bgcolor });
+        executionColors.set(node_id, {
+          color: node.color,
+          bgcolor: node.bgcolor,
+        });
         // Restore original colors for serialization
         node.color = colors.color;
         node.bgcolor = colors.bgcolor;
@@ -1159,4 +1236,3 @@ const LitegraphHook = {
 };
 
 export { LitegraphHook };
-

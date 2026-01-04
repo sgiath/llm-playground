@@ -41,10 +41,15 @@ defmodule Play.LangChain.MessageSerializer do
   """
   @spec serialize_message(Message.t() | map()) :: map() | nil
   def serialize_message(%Message{} = message) do
+    # For tool messages, ensure content is populated from tool_results if needed
+    # Fresh messages from LangChain may have content as nil/ContentParts while
+    # the actual result is in tool_results[0].content
+    content = normalize_tool_message_content(message)
+
     %{
       "_struct" => "Message",
       "role" => atom_to_string(message.role),
-      "content" => serialize_content(message.content),
+      "content" => serialize_content(content),
       "processed_content" => serialize_any(message.processed_content),
       "index" => message.index,
       "status" => atom_to_string(message.status),
@@ -261,7 +266,7 @@ defmodule Play.LangChain.MessageSerializer do
       type: string_to_atom(data["type"], [:function]),
       tool_call_id: data["tool_call_id"],
       name: data["name"],
-      content: deserialize_content(data["content"]),
+      content: force_string_content(data["content"]),
       processed_content: deserialize_any(data["processed_content"]),
       display_text: data["display_text"],
       is_error: data["is_error"] || false,
@@ -275,7 +280,7 @@ defmodule Play.LangChain.MessageSerializer do
       type: :function,
       tool_call_id: data["tool_call_id"] || data["tool_use_id"],
       name: data["name"],
-      content: deserialize_content(data["content"]),
+      content: force_string_content(data["content"]),
       is_error: data["is_error"] || false
     })
   end
@@ -488,6 +493,19 @@ defmodule Play.LangChain.MessageSerializer do
   # Helpers
   # ===========================================================================
 
+  # For tool messages, extract content from tool_results if the message content is nil/empty
+  # Fresh LangChain tool messages may have content as nil while the actual result is in tool_results
+  defp normalize_tool_message_content(%Message{role: :tool, tool_results: [first | _]} = message) do
+    case message.content do
+      nil -> force_string_content(first.content)
+      "" -> force_string_content(first.content)
+      [] -> force_string_content(first.content)
+      content -> content
+    end
+  end
+
+  defp normalize_tool_message_content(%Message{} = message), do: message.content
+
   defp build_tool_message(data) do
     # For tool messages, we need tool_results
     tool_results = deserialize_tool_results(data["tool_results"]) || []
@@ -496,20 +514,68 @@ defmodule Play.LangChain.MessageSerializer do
       # Use the first tool result to build the message
       first_result = List.first(tool_results)
 
-      Message.new_tool_result!(%{
-        tool_call_id: first_result.tool_call_id,
-        content: first_result.content
-      })
-    else
-      # Fallback: create a basic tool message
-      content = deserialize_content(data["content"])
+      # ToolResult may store content as ContentPart list internally (due to migrate_to_content_parts),
+      # so we need to extract the string content
+      content = force_string_content(first_result.content)
 
-      Message.new_tool_result!(%{
-        tool_call_id: data["tool_call_id"] || "unknown",
-        content: content || ""
-      })
+      # NOTE: We cannot use Message.new_tool_result!/1 here because it internally calls
+      # migrate_to_content_parts() which converts our string to ContentParts, and then
+      # the validator rejects ContentParts for role :tool. This is a limitation in LangChain.
+      # We construct the struct directly with validated string content.
+      %Message{
+        role: :tool,
+        content: content,
+        status: :complete,
+        tool_results: tool_results
+      }
+    else
+      # Fallback: create a basic tool message from raw data
+      content = force_string_content(data["content"])
+
+      # Same limitation applies here
+      %Message{
+        role: :tool,
+        content: content || "",
+        status: :complete
+      }
     end
   end
+
+  # Aggressively extract string content from any format
+  # This is a last-resort function that handles ALL possible input formats
+  defp force_string_content(nil), do: ""
+  defp force_string_content(content) when is_binary(content), do: content
+
+  defp force_string_content(content) when is_list(content) do
+    mapped = Enum.map(content, &force_string_from_part/1)
+    filtered = Enum.reject(mapped, &(&1 == "" or is_nil(&1)))
+    result = Enum.join(filtered, "\n")
+
+    case result do
+      "" -> inspect(content)
+      _ -> result
+    end
+  end
+
+  # Handle maps with atom key :content
+  defp force_string_content(%{content: content}), do: force_string_content(content)
+  # Handle serialized maps with string key "content" (from JSON/DB)
+  defp force_string_content(%{"content" => content}), do: force_string_content(content)
+  defp force_string_content(other), do: inspect(other)
+
+  # Extract string from any content part format
+  defp force_string_from_part(nil), do: ""
+  defp force_string_from_part(text) when is_binary(text), do: text
+
+  defp force_string_from_part(%{__struct__: _, content: content}) do
+    force_string_content(content)
+  end
+
+  defp force_string_from_part(%{content: content}) when is_binary(content), do: content
+  defp force_string_from_part(%{content: content}), do: force_string_content(content)
+  defp force_string_from_part(%{"content" => content}) when is_binary(content), do: content
+  defp force_string_from_part(%{"content" => content}), do: force_string_content(content)
+  defp force_string_from_part(other), do: inspect(other)
 
   defp atom_to_string(nil), do: nil
   defp atom_to_string(atom) when is_atom(atom), do: Atom.to_string(atom)
