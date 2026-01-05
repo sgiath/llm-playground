@@ -14,6 +14,7 @@ defmodule Play.NodeExecutors do
   alias LangChain.ChatModels.ChatGrok
   alias LangChain.Chains.LLMChain
   alias LangChain.Message
+  alias LangChain.Message.ContentPart
   alias LangChain.Function
   alias LangChain.FunctionParam
   alias Play.Conversations
@@ -129,19 +130,46 @@ defmodule Play.NodeExecutors do
   # ============================================================================
 
   # Message builder node - creates a LangChain Message
-  def execute("utility/message_builder", _node, inputs, properties, _context) do
-    content = get_input_or_property(inputs, 0, properties, "content", "")
-    role = Map.get(properties, "role", "user")
+  # Accepts dynamic ContentPart inputs or falls back to text content widget
+  # In preview mode, returns nil (treated as not connected)
+  def execute("utility/message_builder", _node, inputs, properties, context) do
+    preview_mode = Map.get(context, :preview, false)
 
-    message =
-      case role do
-        "user" -> Message.new_user!(content)
-        "assistant" -> Message.new_assistant!(content)
-        "system" -> Message.new_system!(content)
-        _ -> Message.new_user!(content)
-      end
+    # In preview mode, return nil so this node is treated as not connected
+    if preview_mode do
+      {:ok, %{0 => nil}}
+    else
+      role = Map.get(properties, "role", "user")
 
-    {:ok, %{0 => message}}
+      # Collect all ContentParts from dynamic inputs
+      parts =
+        inputs
+        |> Enum.sort_by(fn {slot, _} -> slot end)
+        |> Enum.map(fn {_slot, value} -> value end)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.filter(fn
+          %ContentPart{} -> true
+          _ -> false
+        end)
+
+      # Determine content: use parts if any connected, otherwise fall back to text property
+      content =
+        if parts != [] do
+          parts
+        else
+          Map.get(properties, "content", "")
+        end
+
+      message =
+        case role do
+          "user" -> Message.new_user!(content)
+          "assistant" -> Message.new_assistant!(content)
+          "system" -> Message.new_system!(content)
+          _ -> Message.new_user!(content)
+        end
+
+      {:ok, %{0 => message}}
+    end
   end
 
   # Messages combiner node - combines multiple messages into a list
@@ -358,7 +386,7 @@ defmodule Play.NodeExecutors do
     {:ok, %{0 => value}}
   end
 
-  # Message input node - returns a user message from runtime input
+  # Message input node - returns a text ContentPart from runtime input
   # The message content is injected via context[:message_inputs][node_id] at execution time
   # In preview mode, returns nil (treated as not connected)
   def execute("input/message_input", node, _inputs, _properties, context) do
@@ -374,8 +402,38 @@ defmodule Play.NodeExecutors do
 
       # Use dummy message if content is empty to allow workflow to continue
       actual_content = if content == "" or content == nil, do: "No user message", else: content
-      message = Message.new_user!(actual_content)
-      {:ok, %{0 => message}}
+
+      part = ContentPart.text!(actual_content)
+      {:ok, %{0 => part}}
+    end
+  end
+
+  # Image input node - returns an image ContentPart from runtime input
+  # The image data is injected via context[:image_inputs][node_id] at execution time
+  # In preview mode, returns nil (treated as not connected)
+  def execute("input/image_input", node, _inputs, _properties, context) do
+    preview_mode = Map.get(context, :preview, false)
+
+    # In preview mode, return nil so this node is treated as not connected
+    if preview_mode do
+      {:ok, %{0 => nil}}
+    else
+      node_id = node["id"]
+      image_inputs = Map.get(context, :image_inputs, %{})
+
+      case Map.get(image_inputs, node_id) do
+        nil ->
+          # No image uploaded, return nil
+          {:ok, %{0 => nil}}
+
+        %{data: base64_data, media_type: media_type} ->
+          # Create an image ContentPart with the base64 data and media type
+          part = ContentPart.image!(base64_data, media: media_type)
+          {:ok, %{0 => part}}
+
+        _ ->
+          {:ok, %{0 => nil}}
+      end
     end
   end
 
@@ -509,6 +567,12 @@ defmodule Play.NodeExecutors do
     end
   end
 
+  # Fallback for unknown node types
+  def execute(node_type, _node, _inputs, _properties, _context) do
+    Logger.warning("Unknown node type: #{node_type}")
+    {:ok, %{0 => nil}}
+  end
+
   defp do_save_conversation(nil, _conversation_id, _new_name, _mode, _messages) do
     Logger.warning("[Save Conversation] No user profile in context")
     {:error, "User profile not available"}
@@ -573,24 +637,8 @@ defmodule Play.NodeExecutors do
   end
 
   # ============================================================================
-  # Fallback for Unknown Node Types
-  # ============================================================================
-
-  def execute(node_type, _node, _inputs, _properties, _context) do
-    Logger.warning("Unknown node type: #{node_type}")
-    {:ok, %{0 => nil}}
-  end
-
-  # ============================================================================
   # Helper Functions
   # ============================================================================
-
-  defp get_input_or_property(inputs, slot, properties, prop_name, default) do
-    case Map.get(inputs, slot) do
-      nil -> Map.get(properties, prop_name, default)
-      value -> value
-    end
-  end
 
   # Build system prompt with tool descriptions when tools are available
   defp build_system_prompt_with_tools(base_prompt, nil), do: base_prompt

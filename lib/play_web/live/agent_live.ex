@@ -25,6 +25,7 @@ defmodule PlayWeb.AgentLive do
       agent ->
         agent_data = if agent.data == %{}, do: nil, else: agent.data
         message_input_nodes = extract_message_input_nodes(agent_data)
+        image_input_nodes = extract_image_input_nodes(agent_data)
         conversation_display_nodes = extract_conversation_display_nodes(agent_data)
 
         socket =
@@ -40,11 +41,21 @@ defmodule PlayWeb.AgentLive do
           |> assign(:page_title, agent.name)
           |> assign(:message_input_nodes, message_input_nodes)
           |> assign(:message_inputs, %{})
+          |> assign(:image_input_nodes, image_input_nodes)
+          |> assign(:image_inputs, %{})
           |> assign(:conversation_display_nodes, conversation_display_nodes)
           |> assign(:conversation_data, %{})
           |> assign(:execution_outputs, %{})
           |> assign(:streaming_content, %{})
           |> assign(:preview_timer, nil)
+          |> assign(:pending_upload_node_id, nil)
+          |> allow_upload(:image,
+            accept: ~w(.jpg .jpeg .png .webp .gif),
+            max_entries: 10,
+            max_file_size: 10_000_000,
+            auto_upload: true,
+            progress: &handle_image_progress/3
+          )
 
         {:ok, socket}
     end
@@ -62,6 +73,22 @@ defmodule PlayWeb.AgentLive do
         label: get_in(node, ["properties", "label"]) || "User Message"
       }
     end)
+    |> Enum.sort_by(& &1.id)
+  end
+
+  # Extracts image_input nodes from agent data for sidebar display
+  defp extract_image_input_nodes(nil), do: []
+
+  defp extract_image_input_nodes(agent_data) do
+    (agent_data["nodes"] || [])
+    |> Enum.filter(fn node -> node["type"] == "input/image_input" end)
+    |> Enum.map(fn node ->
+      %{
+        id: node["id"],
+        label: get_in(node, ["properties", "label"]) || "Image"
+      }
+    end)
+    |> Enum.sort_by(& &1.id)
   end
 
   # Extracts conversation_display nodes from agent data for sidebar display
@@ -76,6 +103,7 @@ defmodule PlayWeb.AgentLive do
         label: get_in(node, ["properties", "label"]) || "Conversation"
       }
     end)
+    |> Enum.sort_by(& &1.id)
   end
 
   @impl true
@@ -83,33 +111,95 @@ defmodule PlayWeb.AgentLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="flex h-[calc(100vh-14rem)]">
-        <%!-- Message Input Sidebar (Left) --%>
+        <%!-- Input Sidebar (Left) --%>
         <div
-          :if={@message_input_nodes != []}
+          :if={@message_input_nodes != [] || @image_input_nodes != []}
           class="w-72 bg-base-200 border-r border-base-300 flex flex-col"
         >
           <div class="p-4 border-b border-base-300">
             <h2 class="text-sm font-semibold text-base-content/70 uppercase tracking-wide">
-              Message Inputs
+              Inputs
             </h2>
           </div>
 
-          <div class="flex-1 overflow-y-auto p-4 space-y-4">
-            <div :for={node <- @message_input_nodes} class="space-y-2">
-              <label class="text-sm font-medium text-base-content" for={"message-input-#{node.id}"}>
-                {node.label}
-              </label>
-              <textarea
-                id={"message-input-#{node.id}"}
-                name={"message_input[#{node.id}]"}
-                phx-blur="message_input_changed"
-                phx-keyup="message_input_changed"
-                phx-value-node-id={node.id}
-                phx-debounce="300"
-                placeholder="Type your message..."
-                value={Map.get(@message_inputs, node.id, "")}
-                class="textarea textarea-bordered w-full h-24 text-sm resize-none"
-              ></textarea>
+          <div class="flex-1 overflow-y-auto p-4 space-y-6">
+            <%!-- Message Input Section --%>
+            <div :if={@message_input_nodes != []} class="space-y-4">
+              <div :for={node <- @message_input_nodes} class="space-y-2">
+                <label
+                  class="text-sm font-medium text-base-content"
+                  for={"message-input-#{node.id}"}
+                >
+                  {node.label}
+                </label>
+                <textarea
+                  id={"message-input-#{node.id}"}
+                  name={"message_input[#{node.id}]"}
+                  phx-blur="message_input_changed"
+                  phx-keyup="message_input_changed"
+                  phx-value-node-id={node.id}
+                  phx-debounce="300"
+                  placeholder="Type your message..."
+                  value={Map.get(@message_inputs, node.id, "")}
+                  class="textarea textarea-bordered w-full h-24 text-sm resize-none"
+                ></textarea>
+              </div>
+            </div>
+
+            <%!-- Image Input Section --%>
+            <div :if={@image_input_nodes != []} class="space-y-4">
+              <div :for={node <- @image_input_nodes} class="space-y-2">
+                <label class="text-sm font-medium text-base-content">
+                  {node.label}
+                </label>
+
+                <form
+                  id={"image-upload-form-#{node.id}"}
+                  phx-change="validate_image"
+                  phx-submit="upload_image"
+                  phx-value-node-id={node.id}
+                >
+                  <.live_file_input
+                    upload={@uploads.image}
+                    class="file-input file-input-bordered file-input-sm w-full"
+                  />
+                </form>
+
+                <%!-- Show uploaded image preview --%>
+                <div :if={Map.has_key?(@image_inputs, node.id)} class="mt-2">
+                  <div class="relative inline-block">
+                    <img
+                      src={"data:#{@image_inputs[node.id].media_type};base64,#{@image_inputs[node.id].data}"}
+                      class="max-w-full max-h-32 rounded-lg border border-base-300"
+                      alt="Uploaded image"
+                    />
+                    <button
+                      type="button"
+                      phx-click="remove_image"
+                      phx-value-node-id={node.id}
+                      class="absolute -top-2 -right-2 btn btn-circle btn-xs btn-error"
+                    >
+                      <.icon name="hero-x-mark" class="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                <%!-- Show pending uploads --%>
+                <div
+                  :for={entry <- Enum.filter(@uploads.image.entries, &(&1.ref == "#{node.id}"))}
+                  class="mt-2"
+                >
+                  <div class="flex items-center gap-2">
+                    <progress
+                      class="progress progress-primary w-full"
+                      value={entry.progress}
+                      max="100"
+                    >
+                    </progress>
+                    <span class="text-xs">{entry.progress}%</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -291,10 +381,13 @@ defmodule PlayWeb.AgentLive do
     {system_messages, chat_messages} =
       Enum.split_with(messages, fn msg -> msg["role"] == "system" end)
 
+    # Group tool calls with their responses
+    grouped_messages = group_tool_messages(chat_messages)
+
     assigns =
       assigns
       |> assign(:system_messages, system_messages)
-      |> assign(:chat_messages, chat_messages)
+      |> assign(:grouped_messages, grouped_messages)
 
     ~H"""
     <%!-- System Message Banner --%>
@@ -312,16 +405,28 @@ defmodule PlayWeb.AgentLive do
       </div>
     </div>
 
-    <%!-- Chat Messages --%>
+    <%!-- Chat Messages (grouped) --%>
     <div class="space-y-2">
-      <%= for message <- @chat_messages do %>
-        {render_chat_message(assigns, message)}
+      <%= for item <- @grouped_messages do %>
+        {render_grouped_message(assigns, item)}
       <% end %>
     </div>
     """
   end
 
   defp render_conversation_messages(assigns, _), do: ~H""
+
+  # Render a grouped message item (message + any tool responses)
+  defp render_grouped_message(assigns, %{message: message, tool_responses: tool_responses}) do
+    assigns =
+      assigns
+      |> assign(:message, message)
+      |> assign(:tool_responses, tool_responses)
+
+    ~H"""
+    {render_chat_message(assigns, @message, @tool_responses)}
+    """
+  end
 
   # Render all streaming content with loading indicators
   defp render_all_streaming_content(assigns) do
@@ -349,8 +454,8 @@ defmodule PlayWeb.AgentLive do
     """
   end
 
-  # Render a single chat message
-  defp render_chat_message(assigns, %{"role" => "user"} = message) do
+  # Render a single chat message (with tool responses for grouping)
+  defp render_chat_message(assigns, %{"role" => "user"} = message, _tool_responses) do
     assigns = assign(assigns, :message, message)
 
     ~H"""
@@ -365,7 +470,7 @@ defmodule PlayWeb.AgentLive do
     """
   end
 
-  defp render_chat_message(assigns, %{"role" => "assistant"} = message) do
+  defp render_chat_message(assigns, %{"role" => "assistant"} = message, tool_responses) do
     # Extract usage from metadata (where serializer stores it)
     usage = get_in(message, ["metadata", "usage"])
     content = extract_text_content(message["content"])
@@ -376,6 +481,7 @@ defmodule PlayWeb.AgentLive do
       |> assign(:message, message)
       |> assign(:usage, usage)
       |> assign(:rendered_content, rendered_content)
+      |> assign(:tool_responses, tool_responses)
 
     ~H"""
     <div class="chat chat-end">
@@ -383,11 +489,11 @@ defmodule PlayWeb.AgentLive do
         Assistant
       </div>
       <div class="chat-bubble chat-bubble-neutral text-sm chat-markdown">
-        <div>{Phoenix.HTML.raw(@rendered_content)}</div>
+        <div :if={@rendered_content != ""}>{Phoenix.HTML.raw(@rendered_content)}</div>
 
-        <%!-- Tool Calls --%>
-        <div :if={@message["tool_calls"] && @message["tool_calls"] != []} class="mt-2">
-          {render_tool_calls(assigns, @message["tool_calls"])}
+        <%!-- Tool Calls with Grouped Responses --%>
+        <div :if={has_tool_calls?(@message)} class="mt-2">
+          {render_tool_calls_grouped(assigns, @message["tool_calls"], @tool_responses)}
         </div>
 
         <%!-- Token Usage --%>
@@ -399,24 +505,13 @@ defmodule PlayWeb.AgentLive do
     """
   end
 
-  defp render_chat_message(assigns, %{"role" => "tool"} = message) do
-    assigns = assign(assigns, :message, message)
-
-    ~H"""
-    <div class="chat chat-end">
-      <div class="chat-header text-xs opacity-70 mb-1">
-        <.icon name="hero-wrench-screwdriver" class="w-3 h-3 mr-1" /> Tool Result
-      </div>
-      <div class="chat-bubble chat-bubble-accent text-xs font-mono">
-        <div class="max-h-32 overflow-y-auto whitespace-pre-wrap">
-          {truncate_content(@message["content"], 500)}
-        </div>
-      </div>
-    </div>
-    """
+  defp render_chat_message(assigns, %{"role" => "tool"} = _message, _tool_responses) do
+    # Tool messages are now grouped with assistant messages, so we render nothing here
+    # This case shouldn't be reached when using grouped messages, but kept as fallback
+    ~H""
   end
 
-  defp render_chat_message(assigns, message) do
+  defp render_chat_message(assigns, message, _tool_responses) do
     assigns = assign(assigns, :message, message)
 
     ~H"""
@@ -431,29 +526,76 @@ defmodule PlayWeb.AgentLive do
     """
   end
 
-  # Render tool calls
-  defp render_tool_calls(assigns, tool_calls) when is_list(tool_calls) do
-    assigns = assign(assigns, :tool_calls, tool_calls)
+  # Render tool calls grouped with their responses (matching conversation detail page style)
+  defp render_tool_calls_grouped(assigns, tool_calls, tool_responses)
+       when is_list(tool_calls) do
+    assigns =
+      assigns
+      |> assign(:tool_calls, tool_calls)
+      |> assign(:tool_responses, tool_responses)
 
     ~H"""
-    <div class="space-y-1">
-      <%= for tc <- @tool_calls do %>
-        <div class="collapse collapse-arrow bg-base-300/50 rounded">
-          <input type="checkbox" />
-          <div class="collapse-title text-xs py-1 min-h-0 font-mono">
-            <.icon name="hero-wrench-screwdriver" class="w-3 h-3 mr-1" />
-            {tc["name"]}
-          </div>
-          <div class="collapse-content">
-            <pre class="text-xs overflow-x-auto whitespace-pre-wrap">{format_json(tc["arguments"])}</pre>
-          </div>
+    <div class="space-y-3">
+      <div
+        :for={tool_call <- @tool_calls}
+        class="rounded-lg overflow-hidden border border-base-300"
+      >
+        <%!-- Tool name header --%>
+        <div class="bg-base-300 px-3 py-2 flex items-center gap-2">
+          <.icon name="hero-wrench-screwdriver" class="w-4 h-4 text-warning" />
+          <span class="font-mono font-semibold text-sm">{tool_call["name"]}</span>
         </div>
-      <% end %>
+
+        <%!-- Params and Response sections --%>
+        <div class="divide-y divide-base-300">
+          <%!-- Params section --%>
+          <div class="p-3 text-sm">
+            <div class="flex items-center gap-2 mb-2 text-base-content/60">
+              <.icon name="hero-arrow-right-circle" class="w-4 h-4" />
+              <span class="text-xs font-medium uppercase tracking-wide">
+                Params
+              </span>
+            </div>
+            <div class="bg-base-300/50 rounded p-2">
+              <.json_tree content={tool_args_to_json(tool_call["arguments"])} />
+            </div>
+          </div>
+
+          <%!-- Response section (if available) --%>
+          <%= if response = find_tool_response(@tool_responses, tool_call) do %>
+            <div class="p-3 text-sm">
+              <div class="flex items-center gap-2 mb-2 text-base-content/60">
+                <.icon name="hero-arrow-uturn-left" class="w-4 h-4" />
+                <span class="text-xs font-medium uppercase tracking-wide">
+                  Response
+                </span>
+              </div>
+              <div class="bg-base-300/50 rounded p-2">
+                <.json_tree content={extract_tool_response_content(response)} />
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </div>
     </div>
     """
   end
 
-  defp render_tool_calls(assigns, _), do: ~H""
+  defp render_tool_calls_grouped(assigns, _, _), do: ~H""
+
+  # Extract content from a tool response message
+  defp extract_tool_response_content(%{"content" => content}) when is_binary(content), do: content
+
+  defp extract_tool_response_content(%{"content" => content}) when is_list(content) do
+    content
+    |> Enum.map(fn
+      %{"content" => c} when is_binary(c) -> c
+      other -> inspect(other)
+    end)
+    |> Enum.join("\n")
+  end
+
+  defp extract_tool_response_content(_), do: ""
 
   # Render token usage stats
   defp render_token_usage(assigns, usage) when is_map(usage) do
@@ -486,31 +628,208 @@ defmodule PlayWeb.AgentLive do
 
   defp render_token_usage(assigns, _), do: ~H""
 
-  # Format JSON for display
-  defp format_json(data) when is_map(data) do
-    case Jason.encode(data, pretty: true) do
-      {:ok, json} -> json
-      _ -> inspect(data)
+  # ============================================================================
+  # JSON Tree Component
+  # ============================================================================
+
+  # JSON tree component for displaying structured data
+  attr :content, :string, required: true
+
+  defp json_tree(assigns) do
+    parsed = try_parse_json(assigns.content)
+    assigns = assign(assigns, :parsed, parsed)
+
+    ~H"""
+    <%= case @parsed do %>
+      <% {:ok, data} when is_map(data) or is_list(data) -> %>
+        <div class="font-mono text-xs">
+          <.json_node value={data} root={true} />
+        </div>
+      <% _ -> %>
+        <div class="prose prose-sm max-w-none">
+          <p class="whitespace-pre-wrap text-sm">{@content}</p>
+        </div>
+    <% end %>
+    """
+  end
+
+  attr :value, :any, required: true
+  attr :key, :string, default: nil
+  attr :root, :boolean, default: false
+
+  defp json_node(%{value: value} = assigns) when is_map(value) do
+    entries = Map.to_list(value)
+    assigns = assign(assigns, :entries, entries)
+    assigns = assign(assigns, :brace_open, "{")
+    assigns = assign(assigns, :brace_close, "}")
+
+    ~H"""
+    <details class={["ml-2", @root && "-ml-0"]} open={@root}>
+      <summary class="cursor-pointer hover:bg-base-200 rounded px-1 -ml-1 select-none">
+        <span :if={@key} class="text-info">{@key}:</span>
+        <span class="text-base-content/50">{@brace_open}...{@brace_close}</span>
+        <span class="text-base-content/40 text-xs ml-1">({map_size(@value)} keys)</span>
+      </summary>
+      <div class="border-l border-base-300 pl-2 ml-1">
+        <div :for={{k, v} <- @entries}>
+          <.json_node key={to_string(k)} value={v} />
+        </div>
+      </div>
+    </details>
+    """
+  end
+
+  defp json_node(%{value: value} = assigns) when is_list(value) do
+    items = Enum.with_index(value)
+    assigns = assign(assigns, :items, items)
+    assigns = assign(assigns, :bracket_open, "[")
+    assigns = assign(assigns, :bracket_close, "]")
+
+    ~H"""
+    <details class={["ml-2", @root && "-ml-0"]} open={@root}>
+      <summary class="cursor-pointer hover:bg-base-200 rounded px-1 -ml-1 select-none">
+        <span :if={@key} class="text-info">{@key}:</span>
+        <span class="text-base-content/50">{@bracket_open}...{@bracket_close}</span>
+        <span class="text-base-content/40 text-xs ml-1">({length(@value)} items)</span>
+      </summary>
+      <div class="border-l border-base-300 pl-2 ml-1">
+        <div :for={{item, idx} <- @items}>
+          <.json_node key={to_string(idx)} value={item} />
+        </div>
+      </div>
+    </details>
+    """
+  end
+
+  defp json_node(%{value: value} = assigns) when is_binary(value) do
+    ~H"""
+    <div class="ml-2 py-0.5">
+      <span :if={@key} class="text-info">{@key}: </span>
+      <span class="text-success">"{@value}"</span>
+    </div>
+    """
+  end
+
+  defp json_node(%{value: value} = assigns) when is_number(value) do
+    ~H"""
+    <div class="ml-2 py-0.5">
+      <span :if={@key} class="text-info">{@key}: </span>
+      <span class="text-warning">{@value}</span>
+    </div>
+    """
+  end
+
+  defp json_node(%{value: value} = assigns) when is_boolean(value) do
+    ~H"""
+    <div class="ml-2 py-0.5">
+      <span :if={@key} class="text-info">{@key}: </span>
+      <span class="text-accent">{to_string(@value)}</span>
+    </div>
+    """
+  end
+
+  defp json_node(%{value: nil} = assigns) do
+    ~H"""
+    <div class="ml-2 py-0.5">
+      <span :if={@key} class="text-info">{@key}: </span>
+      <span class="text-base-content/50 italic">null</span>
+    </div>
+    """
+  end
+
+  defp json_node(assigns) do
+    ~H"""
+    <div class="ml-2 py-0.5">
+      <span :if={@key} class="text-info">{@key}: </span>
+      <span class="text-base-content">{inspect(@value)}</span>
+    </div>
+    """
+  end
+
+  defp try_parse_json(content) when is_binary(content) do
+    case Jason.decode(content) do
+      {:ok, data} -> {:ok, data}
+      {:error, _} -> :error
     end
   end
 
-  defp format_json(data) when is_binary(data), do: data
-  defp format_json(data), do: inspect(data)
+  defp try_parse_json(_), do: :error
 
-  # Truncate long content
-  defp truncate_content(content, max_length) when is_binary(content) do
-    if String.length(content) > max_length do
-      String.slice(content, 0, max_length) <> "..."
-    else
-      content
-    end
+  # Convert tool arguments to JSON string for json_tree component
+  defp tool_args_to_json(nil), do: "{}"
+  defp tool_args_to_json(args) when is_binary(args), do: args
+  defp tool_args_to_json(args) when is_map(args), do: Jason.encode!(args)
+  defp tool_args_to_json(args), do: inspect(args)
+
+  # ============================================================================
+  # Tool Message Grouping
+  # ============================================================================
+
+  # Check if a message has tool calls (works with serialized format - string keys)
+  defp has_tool_calls?(%{"tool_calls" => tool_calls})
+       when is_list(tool_calls) and tool_calls != [],
+       do: true
+
+  defp has_tool_calls?(_), do: false
+
+  # Group assistant messages with tool_calls together with following tool response messages
+  # Works with serialized message format (string keys)
+  defp group_tool_messages(messages) when is_list(messages) do
+    messages
+    |> Enum.with_index()
+    |> Enum.reduce({[], nil}, fn {msg, idx}, {acc, pending_group} ->
+      cond do
+        # Assistant message with tool calls - start a new group
+        has_tool_calls?(msg) ->
+          # Flush any existing pending group first
+          acc = if pending_group, do: acc ++ [pending_group], else: acc
+          {acc, %{message: msg, index: idx, tool_responses: []}}
+
+        # Tool response message - add to pending group if exists
+        msg["role"] == "tool" and pending_group != nil ->
+          updated_group = %{
+            pending_group
+            | tool_responses: pending_group.tool_responses ++ [{msg, idx}]
+          }
+
+          {acc, updated_group}
+
+        # Regular message - flush pending group and add this message
+        true ->
+          acc = if pending_group, do: acc ++ [pending_group], else: acc
+          {acc ++ [%{message: msg, index: idx, tool_responses: []}], nil}
+      end
+    end)
+    |> then(fn {acc, pending_group} ->
+      # Flush any remaining pending group
+      if pending_group, do: acc ++ [pending_group], else: acc
+    end)
   end
 
-  defp truncate_content(content, max_length) when is_list(content) do
-    truncate_content(extract_text_content(content), max_length)
-  end
+  defp group_tool_messages(_), do: []
 
-  defp truncate_content(content, _), do: inspect(content)
+  # Find the tool response that matches a tool call by call_id or name
+  # Works with serialized format (string keys)
+  defp find_tool_response(tool_responses, tool_call) do
+    Enum.find_value(tool_responses, fn {response_msg, _idx} ->
+      # Check if this tool response matches the tool call
+      tool_call_id = tool_call["call_id"] || tool_call["id"]
+      tool_name = tool_call["name"]
+
+      response_call_id = response_msg["tool_call_id"]
+      response_name = response_msg["name"]
+
+      if (tool_call_id && response_call_id == tool_call_id) ||
+           (tool_name && response_name == tool_name) do
+        response_msg
+      else
+        # Fallback: if there's only one tool response and one tool call, match them
+        if length(tool_responses) == 1 do
+          response_msg
+        end
+      end
+    end)
+  end
 
   # Extract text content from serialized message content
   # Content can be a string, a list of ContentPart maps, or nil
@@ -566,6 +885,7 @@ defmodule PlayWeb.AgentLive do
     node_count = length(agent_data["nodes"] || [])
     link_count = length(agent_data["links"] || [])
     message_input_nodes = extract_message_input_nodes(agent_data)
+    image_input_nodes = extract_image_input_nodes(agent_data)
     conversation_display_nodes = extract_conversation_display_nodes(agent_data)
 
     # Skip the initial empty agent state if we have a saved agent to load
@@ -586,6 +906,7 @@ defmodule PlayWeb.AgentLive do
             |> assign(:node_count, node_count)
             |> assign(:link_count, link_count)
             |> assign(:message_input_nodes, message_input_nodes)
+            |> assign(:image_input_nodes, image_input_nodes)
             |> assign(:conversation_display_nodes, conversation_display_nodes)
 
           {:error, _changeset} ->
@@ -596,6 +917,7 @@ defmodule PlayWeb.AgentLive do
             |> assign(:node_count, node_count)
             |> assign(:link_count, link_count)
             |> assign(:message_input_nodes, message_input_nodes)
+            |> assign(:image_input_nodes, image_input_nodes)
             |> assign(:conversation_display_nodes, conversation_display_nodes)
         end
 
@@ -754,6 +1076,61 @@ defmodule PlayWeb.AgentLive do
     {:noreply, socket}
   end
 
+  # Handle image upload validation - tracks which node is being uploaded to
+  @impl true
+  def handle_event("validate_image", %{"node-id" => node_id_str}, socket) do
+    node_id = String.to_integer(node_id_str)
+    # Store the target node for the pending upload
+    {:noreply, assign(socket, :pending_upload_node_id, node_id)}
+  end
+
+  def handle_event("validate_image", _params, socket) do
+    {:noreply, socket}
+  end
+
+  # Handle image removal
+  def handle_event("remove_image", %{"node-id" => node_id_str}, socket) do
+    node_id = String.to_integer(node_id_str)
+    image_inputs = Map.delete(socket.assigns.image_inputs, node_id)
+    {:noreply, assign(socket, :image_inputs, image_inputs)}
+  end
+
+  # Handle image upload progress - auto-uploads when complete
+  defp handle_image_progress(:image, entry, socket) do
+    if entry.done? do
+      # Get the target node_id from the pending upload tracking
+      node_id = socket.assigns[:pending_upload_node_id]
+
+      if node_id do
+        # Consume the completed entry
+        uploaded =
+          consume_uploaded_entry(socket, entry, fn %{path: path} ->
+            {:ok, binary} = File.read(path)
+            base64_data = Base.encode64(binary)
+
+            {:ok,
+             %{
+               data: base64_data,
+               media_type: entry.client_type,
+               filename: entry.client_name
+             }}
+          end)
+
+        # Store the uploaded image and clear the pending tracking
+        image_inputs = Map.put(socket.assigns.image_inputs, node_id, uploaded)
+
+        socket
+        |> assign(:image_inputs, image_inputs)
+        |> assign(:pending_upload_node_id, nil)
+        |> then(&{:noreply, &1})
+      else
+        {:noreply, socket}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
   # Handle send messages button click
   @impl true
   def handle_event("send_messages", _params, socket) do
@@ -777,12 +1154,14 @@ defmodule PlayWeb.AgentLive do
   def handle_event("execute_workflow", %{"graph" => agent_data}, socket) do
     Logger.info("Starting workflow execution with #{length(agent_data["nodes"] || [])} nodes")
 
-    # Start async execution with message inputs and user profile
+    # Start async execution with message inputs, image inputs, and user profile
     message_inputs = socket.assigns.message_inputs
+    image_inputs = socket.assigns.image_inputs
     user_profile = socket.assigns.current_scope.profile
 
     WorkflowExecutor.execute_async(agent_data, self(),
       message_inputs: message_inputs,
+      image_inputs: image_inputs,
       user_profile: user_profile
     )
 

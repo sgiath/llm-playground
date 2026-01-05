@@ -34,6 +34,7 @@ defmodule Play.Web.Live.Nodes do
       number_input_node(),
       variable_node(),
       message_input_node(),
+      image_input_node(),
 
       # Output nodes
       display_node(),
@@ -423,9 +424,9 @@ defmodule Play.Web.Live.Nodes do
       type: "message_input",
       title: "Message Input",
       description:
-        "User message input that appears in the sidebar. When present, a textarea will be shown for user input.",
+        "User message input that appears in the sidebar. When present, a textarea will be shown for user input. Outputs a text content part.",
       category: "input",
-      outputs: [%{name: "message", type: "message"}],
+      outputs: [%{name: "part", type: "message_part"}],
       properties: [
         %{name: "label", default: "User Message"}
       ],
@@ -442,8 +443,38 @@ defmodule Play.Web.Live.Nodes do
       bgcolor: "#1a1a2e",
       execute_code: """
       // Runtime value is injected by the server during execution
-      // This returns a placeholder that will be replaced by actual user input
-      return { role: 'user', content: properties._runtime_value || '' };
+      // This returns a ContentPart with text content
+      return { type: 'text', content: properties._runtime_value || '' };
+      """
+    }
+  end
+
+  defp image_input_node do
+    %{
+      type: "image_input",
+      title: "Image Input",
+      description:
+        "Image input that appears in the sidebar. When present, a file upload will be shown for selecting images.",
+      category: "input",
+      outputs: [%{name: "part", type: "message_part"}],
+      properties: [
+        %{name: "label", default: "Image"}
+      ],
+      widgets: [
+        %{
+          type: "text",
+          name: "Label",
+          property: "label",
+          default: "Image"
+        }
+      ],
+      size: [200, 80],
+      color: "#22c55e",
+      bgcolor: "#1a1a2e",
+      execute_code: """
+      // Runtime value is injected by the server during execution
+      // This returns a ContentPart with image data
+      return properties._runtime_value || null;
       """
     }
   end
@@ -533,13 +564,15 @@ defmodule Play.Web.Live.Nodes do
     %{
       type: "message_builder",
       title: "Message Builder",
-      description: "Builds a message with role and content",
+      description:
+        "Builds a message with role and content parts. Connect text/image parts directly, or use text widget for simple messages.",
       category: "utility",
-      inputs: [%{name: "content", type: "text"}],
+      inputs: [%{name: "part1", type: "message_part"}],
       outputs: [%{name: "message", type: "message"}],
       properties: [
         %{name: "role", default: "user"},
-        %{name: "content", default: ""}
+        %{name: "content", default: ""},
+        %{name: "input_count", default: 1}
       ],
       widgets: [
         %{
@@ -548,23 +581,30 @@ defmodule Play.Web.Live.Nodes do
           property: "role",
           default: "user",
           options: %{values: ["user", "assistant"]}
-        },
-        %{
-          type: "text",
-          name: "Content",
-          property: "content",
-          default: "",
-          options: %{multiline: true}
         }
       ],
-      # Hide "Content" widget when "content" input is connected
-      hide_widget_on_input: %{"content" => "Content"},
-      size: [200, 120],
+      size: [200, 180],
       color: "#6366f1",
       bgcolor: "#1a1a2e",
+      # Enable dynamic inputs for message parts
+      dynamic_inputs: %{
+        type: "message_part",
+        name_prefix: "part",
+        min: 1,
+        max: 10,
+        start_slot: 0,
+        auto_add: true
+      },
       execute_code: """
-      const content = inputs[0] || properties.content;
-      return { role: properties.role, content: content };
+      // Collect all connected parts
+      const parts = [];
+      for (let i = 0; i < inputs.length; i++) {
+        if (inputs[i] && typeof inputs[i] === 'object' && inputs[i].type) {
+          parts.push(inputs[i]);
+        }
+      }
+
+      return { role: properties.role, content: parts };
       """
     }
   end

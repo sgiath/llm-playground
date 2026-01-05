@@ -909,7 +909,10 @@ const LitegraphHook = {
     };
 
     // Add onConnectionsChange to handle widget visibility
+    // Must combine with existing dynamic_inputs handler if both are present
     if (hide_widget_on_input) {
+      const existingConnectionsChange = DynamicNode.prototype.onConnectionsChange;
+      
       DynamicNode.prototype.onConnectionsChange = function (
         connectionType,
         slotIndex,
@@ -917,6 +920,11 @@ const LitegraphHook = {
         link,
         ioSlot
       ) {
+        // Call existing handler first (for dynamic_inputs auto-add)
+        if (existingConnectionsChange) {
+          existingConnectionsChange.call(this, connectionType, slotIndex, isConnected, link, ioSlot);
+        }
+        // Then update widget visibility
         updateWidgetVisibility(this);
       };
 
