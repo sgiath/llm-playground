@@ -51,6 +51,7 @@ defmodule Play.Web.Live.Nodes do
 
       # Tool nodes
       web_search_tool_node(),
+      url_fetch_tool_node(),
       tools_combiner_node(),
 
       # Storage nodes
@@ -838,6 +839,56 @@ defmodule Play.Web.Live.Nodes do
         },
         _config: {
           max_results: properties.max_results
+        }
+      };
+      """
+    }
+  end
+
+  defp url_fetch_tool_node do
+    %{
+      type: "url_fetch_tool",
+      title: "URL Fetch",
+      description:
+        "Fetches page content and metadata from a URL. Returns title, description, and text content.",
+      category: "tool",
+      outputs: [%{name: "tool", type: "tool"}],
+      properties: [
+        %{name: "device", default: "desktop"}
+      ],
+      widgets: [
+        %{
+          type: "combo",
+          name: "Device",
+          property: "device",
+          default: "desktop",
+          options: %{
+            values: ["desktop", "mobile"]
+          }
+        }
+      ],
+      size: [200, 90],
+      color: "#ec4899",
+      bgcolor: "#1a1a2e",
+      execute_code: """
+      return {
+        type: 'function',
+        function: {
+          name: 'fetch_url',
+          description: 'Fetch the content and metadata from a URL. Returns the page title, description, and extracted text content. Use this to read the contents of web pages.',
+          parameters: {
+            type: 'object',
+            properties: {
+              url: {
+                type: 'string',
+                description: 'The URL to fetch content from'
+              }
+            },
+            required: ['url']
+          }
+        },
+        _config: {
+          device: properties.device
         }
       };
       """

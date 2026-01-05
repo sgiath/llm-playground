@@ -54,6 +54,17 @@ config :langchain,
   google_ai_key: google_ai_api_key,
   grok_key: xai_api_key
 
+page_metadata_api_key =
+  System.get_env("PAGE_METADATA_API_KEY") ||
+    raise """
+    environment variable PAGE_METADATA_API_KEY is missing.
+    Get it from your CrazyEgg dashboard at https://crazyegg.com
+    """
+
+config :play, Play.PageMetadata,
+  base_url: "https://page-metadata-api.crazyeggstaging.com",
+  auth: {:bearer, page_metadata_api_key}
+
 if System.get_env("PHX_SERVER") do
   config :play, PlayWeb.Endpoint, server: true
 end

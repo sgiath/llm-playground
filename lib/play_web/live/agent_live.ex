@@ -37,6 +37,7 @@ defmodule PlayWeb.AgentLive do
           |> assign(:link_count, length(agent_data["links"] || []))
           |> assign(:node_types, Nodes.node_types())
           |> assign(:execution_status, :idle)
+          |> assign(:is_preview_execution, false)
           |> assign(:editing_name, false)
           |> assign(:page_title, agent.name)
           |> assign(:message_input_nodes, message_input_nodes)
@@ -135,14 +136,11 @@ defmodule PlayWeb.AgentLive do
                 <textarea
                   id={"message-input-#{node.id}"}
                   name={"message_input[#{node.id}]"}
-                  phx-blur="message_input_changed"
                   phx-keyup="message_input_changed"
                   phx-value-node-id={node.id}
-                  phx-debounce="300"
                   placeholder="Type your message..."
-                  value={Map.get(@message_inputs, node.id, "")}
                   class="textarea textarea-bordered w-full h-24 text-sm resize-none"
-                ></textarea>
+                >{Map.get(@message_inputs, node.id, "")}</textarea>
               </div>
             </div>
 
@@ -456,7 +454,14 @@ defmodule PlayWeb.AgentLive do
 
   # Render a single chat message (with tool responses for grouping)
   defp render_chat_message(assigns, %{"role" => "user"} = message, _tool_responses) do
-    assigns = assign(assigns, :message, message)
+    text_content = extract_text_content(message["content"])
+    image_parts = extract_image_parts(message["content"])
+
+    assigns =
+      assigns
+      |> assign(:message, message)
+      |> assign(:text_content, text_content)
+      |> assign(:image_parts, image_parts)
 
     ~H"""
     <div class="chat chat-start">
@@ -464,7 +469,19 @@ defmodule PlayWeb.AgentLive do
         User
       </div>
       <div class="chat-bubble chat-bubble-primary text-sm">
-        {extract_text_content(@message["content"])}
+        <%!-- Text content --%>
+        <div :if={@text_content != ""}>{@text_content}</div>
+
+        <%!-- Images --%>
+        <div :if={@image_parts != []} class={[@text_content != "" && "mt-2", "flex flex-wrap gap-2"]}>
+          <img
+            :for={img <- @image_parts}
+            :if={img.url}
+            src={img.url}
+            class="max-w-48 max-h-48 rounded-lg object-contain"
+            alt="User uploaded image"
+          />
+        </div>
       </div>
     </div>
     """
@@ -848,6 +865,53 @@ defmodule PlayWeb.AgentLive do
 
   defp extract_text_content(content), do: inspect(content)
 
+  # Extract image parts from message content
+  defp extract_image_parts(nil), do: []
+  defp extract_image_parts(content) when is_binary(content), do: []
+
+  defp extract_image_parts(content) when is_list(content) do
+    content
+    |> Enum.filter(fn
+      %{"type" => type} when type in ["image", "image_url"] -> true
+      _ -> false
+    end)
+    |> Enum.map(fn part ->
+      %{
+        type: part["type"],
+        content: part["content"],
+        # For image_url type, content might be the URL or a struct with url field
+        url: get_image_url(part)
+      }
+    end)
+  end
+
+  defp extract_image_parts(_), do: []
+
+  # Get the actual URL/data from an image part
+  defp get_image_url(%{
+         "type" => "image",
+         "content" => content,
+         "options" => %{"media_type" => media_type}
+       })
+       when is_binary(content) do
+    "data:#{media_type};base64,#{content}"
+  end
+
+  defp get_image_url(%{"type" => "image", "content" => content}) when is_binary(content) do
+    # Base64 encoded image - create a data URL, default to png
+    "data:image/png;base64,#{content}"
+  end
+
+  defp get_image_url(%{"type" => "image_url", "content" => content}) when is_binary(content) do
+    content
+  end
+
+  defp get_image_url(%{"type" => "image_url", "content" => %{"url" => url}}) do
+    url
+  end
+
+  defp get_image_url(_), do: nil
+
   # ============================================================================
   # Event Handlers
   # ============================================================================
@@ -1069,9 +1133,11 @@ defmodule PlayWeb.AgentLive do
     else
       # Request the current agent from JS for execution
       # Keep conversation_data visible, only clear streaming content for fresh stream
+      # Mark as non-preview execution so inputs are cleared on completion
       socket =
         socket
         |> assign(:execution_status, :running)
+        |> assign(:is_preview_execution, false)
         |> assign(:streaming_content, %{})
         |> push_event("request_execution", %{})
 
@@ -1159,9 +1225,11 @@ defmodule PlayWeb.AgentLive do
     else
       # Request the current agent from JS for execution with message inputs
       # Keep conversation_data visible, only clear streaming content for fresh stream
+      # Mark as non-preview execution so inputs are cleared on completion
       socket =
         socket
         |> assign(:execution_status, :running)
+        |> assign(:is_preview_execution, false)
         |> assign(:streaming_content, %{})
         |> push_event("request_execution", %{})
 
@@ -1472,7 +1540,12 @@ defmodule PlayWeb.AgentLive do
       {:noreply, socket}
     else
       # Request the current agent from JS for preview execution
-      socket = push_event(socket, "request_preview", %{})
+      # Mark this as a preview execution so we don't clear inputs on completion
+      socket =
+        socket
+        |> assign(:is_preview_execution, true)
+        |> push_event("request_preview", %{})
+
       {:noreply, socket}
     end
   end
@@ -1574,12 +1647,23 @@ defmodule PlayWeb.AgentLive do
   def handle_info({:execution_complete, results}, socket) do
     Logger.info("Workflow execution complete with #{map_size(results)} node results")
 
+    # Only clear message/image inputs and trigger clear_message_inputs for full executions
+    # Preview executions should not clear user inputs
+    is_preview = socket.assigns[:is_preview_execution] || false
+
     socket =
-      socket
-      |> assign(:execution_status, :complete)
-      |> assign(:message_inputs, %{})
-      |> push_event("execution_complete", %{})
-      |> push_event("clear_message_inputs", %{})
+      if is_preview do
+        socket
+        |> assign(:execution_status, :idle)
+        |> push_event("execution_complete", %{})
+      else
+        socket
+        |> assign(:execution_status, :complete)
+        |> assign(:message_inputs, %{})
+        |> assign(:image_inputs, %{})
+        |> push_event("execution_complete", %{})
+        |> push_event("clear_message_inputs", %{})
+      end
 
     {:noreply, socket}
   end

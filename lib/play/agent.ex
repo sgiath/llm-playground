@@ -21,7 +21,7 @@ defmodule Play.Agent do
   """
   def create_changeset(agent, attrs) do
     agent
-    |> cast(attrs, [:name, :data])
+    |> cast(sanitize_attrs(attrs), [:name, :data])
     |> validate_required([:name])
     |> validate_length(:name, min: 1, max: 255)
   end
@@ -31,7 +31,29 @@ defmodule Play.Agent do
   """
   def update_changeset(agent, attrs) do
     agent
-    |> cast(attrs, [:name, :data])
+    |> cast(sanitize_attrs(attrs), [:name, :data])
     |> validate_length(:name, min: 1, max: 255)
   end
+
+  # Sanitize attributes before casting to remove null bytes that PostgreSQL can't handle.
+  # This is necessary because URL content may contain \u0000 characters.
+  defp sanitize_attrs(attrs) when is_map(attrs) do
+    Map.new(attrs, fn {k, v} -> {k, sanitize_value(v)} end)
+  end
+
+  defp sanitize_attrs(attrs), do: attrs
+
+  defp sanitize_value(value) when is_binary(value) do
+    String.replace(value, <<0>>, "")
+  end
+
+  defp sanitize_value(value) when is_map(value) do
+    Map.new(value, fn {k, v} -> {sanitize_value(k), sanitize_value(v)} end)
+  end
+
+  defp sanitize_value(value) when is_list(value) do
+    Enum.map(value, &sanitize_value/1)
+  end
+
+  defp sanitize_value(value), do: value
 end

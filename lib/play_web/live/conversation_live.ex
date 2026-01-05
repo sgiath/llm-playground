@@ -130,9 +130,20 @@ defmodule PlayWeb.ConversationLive do
                     </form>
                   <% else %>
                     <div class="prose prose-sm max-w-none">
-                      <p :if={extract_content(item.message) != ""} class="whitespace-pre-wrap">
-                        {extract_content(item.message)}
+                      <p :if={extract_text_content(item.message) != ""} class="whitespace-pre-wrap">
+                        {extract_text_content(item.message)}
                       </p>
+                      <div
+                        :if={extract_image_parts(item.message) != []}
+                        class="flex flex-wrap gap-2 mt-2 not-prose"
+                      >
+                        <img
+                          :for={image_part <- extract_image_parts(item.message)}
+                          src={get_image_url(image_part)}
+                          class="max-w-48 max-h-48 object-contain rounded-lg border border-base-300"
+                          alt="User uploaded image"
+                        />
+                      </div>
                     </div>
 
                     <%!-- Tool calls with grouped responses --%>
@@ -563,6 +574,85 @@ defmodule PlayWeb.ConversationLive do
 
   defp extract_content(%{content: nil}), do: ""
   defp extract_content(_), do: ""
+
+  # Extract only text content from message (filtering out images)
+  defp extract_text_content(%{content: content}) when is_binary(content), do: content
+
+  defp extract_text_content(%{content: content}) when is_list(content) do
+    content
+    |> Enum.filter(fn
+      %{type: :text} -> true
+      %{type: "text"} -> true
+      %{"type" => "text"} -> true
+      _ -> false
+    end)
+    |> Enum.map(fn
+      %{content: c} when is_binary(c) -> c
+      %{"content" => c} when is_binary(c) -> c
+      _ -> ""
+    end)
+    |> Enum.join("\n")
+  end
+
+  defp extract_text_content(%{content: nil}), do: ""
+  defp extract_text_content(_), do: ""
+
+  # Extract image parts from message content
+  defp extract_image_parts(%{content: content}) when is_list(content) do
+    Enum.filter(content, fn
+      %{type: :image} -> true
+      %{type: :image_url} -> true
+      %{type: "image"} -> true
+      %{type: "image_url"} -> true
+      %{"type" => "image"} -> true
+      %{"type" => "image_url"} -> true
+      _ -> false
+    end)
+  end
+
+  defp extract_image_parts(_), do: []
+
+  # Get displayable URL for an image content part
+  # ContentPart struct with keyword list options (from deserialization)
+  defp get_image_url(%{type: :image, content: base64_data, options: options})
+       when is_list(options) do
+    media_type = Keyword.get(options, :media_type, "image/png")
+    "data:#{media_type};base64,#{base64_data}"
+  end
+
+  # ContentPart struct with map options
+  defp get_image_url(%{type: :image, content: base64_data, options: %{media_type: media_type}}) do
+    "data:#{media_type};base64,#{base64_data}"
+  end
+
+  defp get_image_url(%{type: :image, content: base64_data, options: options})
+       when is_map(options) do
+    media_type = Map.get(options, :media_type) || Map.get(options, "media_type", "image/png")
+    "data:#{media_type};base64,#{base64_data}"
+  end
+
+  # Fallback for image without options
+  defp get_image_url(%{type: :image, content: base64_data}) do
+    "data:image/png;base64,#{base64_data}"
+  end
+
+  defp get_image_url(%{type: :image_url, content: url}), do: url
+
+  # Map-based (string keys) for raw JSON data
+  defp get_image_url(%{
+         "type" => "image",
+         "content" => base64_data,
+         "options" => %{"media_type" => media_type}
+       }) do
+    "data:#{media_type};base64,#{base64_data}"
+  end
+
+  defp get_image_url(%{"type" => "image", "content" => base64_data}) do
+    "data:image/png;base64,#{base64_data}"
+  end
+
+  defp get_image_url(%{"type" => "image_url", "content" => url}), do: url
+  defp get_image_url(_), do: nil
 
   defp has_tool_calls?(%{tool_calls: tool_calls}) when is_list(tool_calls) and tool_calls != [],
     do: true

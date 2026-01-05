@@ -250,6 +250,26 @@ defmodule Play.NodeExecutors do
     {:ok, %{0 => function}}
   end
 
+  # URL fetch tool node - creates a LangChain Function for fetching page content and metadata
+  def execute("tool/url_fetch_tool", _node, _inputs, properties, _context) do
+    device = Map.get(properties, "device", "desktop")
+
+    function =
+      Function.new!(%{
+        name: "fetch_url",
+        description:
+          "Fetch the content and metadata from a URL. Returns the page title, description, and extracted text content. Use this to read the contents of web pages.",
+        parameters: [
+          FunctionParam.new!(%{name: "url", type: :string, required: true})
+        ],
+        function: fn %{"url" => url}, _context ->
+          execute_url_fetch(url, device)
+        end
+      })
+
+    {:ok, %{0 => function}}
+  end
+
   # Tools combiner node - combines multiple tools into a list
   def execute("tool/tools_combiner", _node, inputs, _properties, _context) do
     tools =
@@ -721,6 +741,18 @@ defmodule Play.NodeExecutors do
 
       {:error, reason} ->
         {:error, "SearxNG request failed: #{inspect(reason)}"}
+    end
+  end
+
+  defp execute_url_fetch(url, device) do
+    Logger.info("Fetching URL content: #{url}")
+
+    case Play.PageMetadata.fetch(url, device: device) do
+      {:ok, metadata} ->
+        {:ok, Jason.encode!(metadata)}
+
+      {:error, reason} ->
+        {:error, "URL fetch failed: #{reason}"}
     end
   end
 end
