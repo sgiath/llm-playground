@@ -46,6 +46,24 @@ const LitegraphHook = {
     LiteGraph.NODE_TITLE_COLOR = "#ffffff";
     LiteGraph.NODE_SELECTED_TITLE_COLOR = "#ffffff";
     LiteGraph.NODE_TEXT_COLOR = "#e0e0e0";
+    
+    // Modern widget styling - bigger widgets with more space
+    LiteGraph.NODE_WIDGET_HEIGHT = 28;  // Increased from 20
+    LiteGraph.NODE_SLOT_HEIGHT = 24;    // Slightly taller slots
+    LiteGraph.NODE_TITLE_HEIGHT = 34;   // Slightly taller title
+    LiteGraph.NODE_TEXT_SIZE = 14;      // Readable text size
+    
+    // Modern widget colors - cleaner, more contrast
+    LiteGraph.WIDGET_BGCOLOR = "#1a1a2e";        // Darker, slightly blue-tinted
+    LiteGraph.WIDGET_OUTLINE_COLOR = "#4a4a6a";  // Softer outline
+    LiteGraph.WIDGET_TEXT_COLOR = "#f0f0f0";     // Brighter text
+    LiteGraph.WIDGET_SECONDARY_TEXT_COLOR = "#a0a0b0";  // Softer secondary text
+    LiteGraph.WIDGET_MARGIN = 10;                // Widget side margin
+    
+    // Node colors - modern dark theme
+    LiteGraph.NODE_DEFAULT_COLOR = "#2d2d44";
+    LiteGraph.NODE_DEFAULT_BGCOLOR = "#1e1e2e";
+    LiteGraph.NODE_DEFAULT_BOXCOLOR = "#5a5a7a";
 
     // Create the graph
     this.graph = new LGraph();
@@ -263,6 +281,8 @@ const LitegraphHook = {
   setupExecutionEventHandlers() {
     // Initialize streaming content storage
     this.streamingContent = new Map(); // node_id -> accumulated content
+    // Track if we're in preview mode (no visual highlighting)
+    this._previewMode = false;
 
     // Server requests current graph for execution
     this.handleEvent("request_execution", () => {
@@ -271,12 +291,25 @@ const LitegraphHook = {
       this.resetExecutionState();
       // Clear any previous streaming content
       this.streamingContent.clear();
+      // Full execution mode - enable highlighting
+      this._previewMode = false;
       const graphData = this.graph.serialize();
       this.pushEvent("execute_workflow", { graph: graphData });
     });
 
-    // Node is starting execution - highlight it
+    // Server requests current graph for preview execution
+    this.handleEvent("request_preview", () => {
+      // Preview mode - no visual highlighting
+      this._previewMode = true;
+      const graphData = this.graph.serialize();
+      this.pushEvent("execute_preview", { graph: graphData });
+    });
+
+    // Node is starting execution - highlight it (unless in preview mode)
     this.handleEvent("node_executing", (payload) => {
+      // Skip highlighting in preview mode
+      if (this._previewMode) return;
+
       const { node_id } = payload;
       const node = this.graph.getNodeById(node_id);
       if (node) {
@@ -323,13 +356,16 @@ const LitegraphHook = {
       const { node_id, output } = payload;
       const node = this.graph.getNodeById(node_id);
       if (node) {
-        // Remove from executing, add to completed
-        this.executingNodes.delete(node_id);
-        this.completedNodes.add(node_id);
+        // Skip visual highlighting in preview mode
+        if (!this._previewMode) {
+          // Remove from executing, add to completed
+          this.executingNodes.delete(node_id);
+          this.completedNodes.add(node_id);
 
-        // Set completed visual style (green)
-        node.color = "#22c55e";
-        node.bgcolor = "#14532d";
+          // Set completed visual style (green)
+          node.color = "#22c55e";
+          node.bgcolor = "#14532d";
+        }
 
         // Update connected Display nodes with final output
         if (output !== null && output !== undefined) {
@@ -566,6 +602,14 @@ const LitegraphHook = {
                 console.log(
                   `Manual save conversation triggered for node ${nodeId}`
                 );
+              } else if (w.callback === "editConversation") {
+                // Navigate to conversation editor
+                const conversationId = this.properties.conversation_id;
+                if (conversationId && conversationId !== "__new__") {
+                  window.location.href = `/conv/${conversationId}`;
+                } else {
+                  console.warn("No conversation selected to edit");
+                }
               }
             };
             this.addWidget(

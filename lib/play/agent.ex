@@ -1,4 +1,4 @@
-defmodule Play.Graph do
+defmodule Play.Agent do
   use Ecto.Schema
 
   import Ecto.Changeset
@@ -6,6 +6,7 @@ defmodule Play.Graph do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
+  # Keep the database table name as "graphs" to avoid migration
   schema "graphs" do
     field :name, :string
     field :data, :map, default: %{}
@@ -16,20 +17,20 @@ defmodule Play.Graph do
   end
 
   @doc """
-  Changeset for creating a new graph.
+  Changeset for creating a new agent.
   """
-  def create_changeset(graph, attrs) do
-    graph
+  def create_changeset(agent, attrs) do
+    agent
     |> cast(attrs, [:name, :data])
     |> validate_required([:name])
     |> validate_length(:name, min: 1, max: 255)
   end
 
   @doc """
-  Changeset for updating a graph.
+  Changeset for updating an agent.
   """
-  def update_changeset(graph, attrs) do
-    graph
+  def update_changeset(agent, attrs) do
+    agent
     |> cast(attrs, [:name, :data])
     |> validate_length(:name, min: 1, max: 255)
   end

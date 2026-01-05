@@ -65,7 +65,7 @@ defmodule Play.NodeExecutors do
   # ============================================================================
 
   # OpenAI LLM configuration node
-  def execute("llm/openai", _node, inputs, properties, _context) do
+  def execute("llm/openai", _node, _inputs, properties, _context) do
     model = Map.get(properties, "model", "gpt-5.2")
     reasoning_effort = Map.get(properties, "reasoning_effort", "medium")
 
@@ -80,7 +80,7 @@ defmodule Play.NodeExecutors do
   end
 
   # Anthropic LLM configuration node
-  def execute("llm/anthropic", _node, inputs, properties, _context) do
+  def execute("llm/anthropic", _node, _inputs, properties, _context) do
     model = Map.get(properties, "model", "claude-sonnet-4-20250514")
     reasoning_effort = Map.get(properties, "reasoning_effort", "medium")
 
@@ -95,7 +95,7 @@ defmodule Play.NodeExecutors do
   end
 
   # Google AI LLM configuration node
-  def execute("llm/google_ai", _node, inputs, properties, _context) do
+  def execute("llm/google_ai", _node, _inputs, properties, _context) do
     model = Map.get(properties, "model", "gemini-2.5-pro")
     reasoning_effort = Map.get(properties, "reasoning_effort", "medium")
 
@@ -110,7 +110,7 @@ defmodule Play.NodeExecutors do
   end
 
   # xAI Grok LLM configuration node
-  def execute("llm/xai", _node, inputs, properties, _context) do
+  def execute("llm/xai", _node, _inputs, properties, _context) do
     model = Map.get(properties, "model", "grok-3")
     reasoning_effort = Map.get(properties, "reasoning_effort", "medium")
 
@@ -235,96 +235,103 @@ defmodule Play.NodeExecutors do
     system_override = Map.get(inputs, 1)
     messages = Map.get(inputs, 2, [])
     tools = Map.get(inputs, 3, [])
+    preview_mode = Map.get(context, :preview, false)
 
-    base_system_prompt =
-      system_override || Map.get(properties, "system_prompt", "You are a helpful assistant.")
-
-    # Enhance system prompt with tool descriptions when tools are connected
-    system_prompt = build_system_prompt_with_tools(base_system_prompt, tools)
-
-    stream = Map.get(properties, "stream", true)
-
-    if is_nil(llm_config) do
-      {:error, "No LLM configuration provided to Agent node"}
+    # In preview mode, pass through input messages without LLM call
+    if preview_mode do
+      Logger.info("[Preview] Agent node passing through #{length(List.wrap(messages))} messages")
+      {:ok, %{0 => "", 1 => List.wrap(messages), 2 => []}}
     else
-      # Update the LLM to use the stream setting from the agent
-      llm_config = %{llm_config | stream: stream}
+      base_system_prompt =
+        system_override || Map.get(properties, "system_prompt", "You are a helpful assistant.")
 
-      # Get caller_pid and node_id from context for streaming callbacks
-      caller_pid = Map.get(context, :caller_pid)
-      node_id = node["id"]
+      # Enhance system prompt with tool descriptions when tools are connected
+      system_prompt = build_system_prompt_with_tools(base_system_prompt, tools)
 
-      # Create streaming callback handler
-      handler =
-        if caller_pid do
-          %{
-            on_message_delta: fn _chain, delta ->
-              if delta.content && delta.content != "" do
-                send(caller_pid, {:stream_delta, node_id, delta.content})
+      stream = Map.get(properties, "stream", true)
+
+      if is_nil(llm_config) do
+        {:error, "No LLM configuration provided to Agent node"}
+      else
+        # Update the LLM to use the stream setting from the agent
+        llm_config = %{llm_config | stream: stream}
+
+        # Get caller_pid and node_id from context for streaming callbacks
+        caller_pid = Map.get(context, :caller_pid)
+        node_id = node["id"]
+
+        # Create streaming callback handler
+        handler =
+          if caller_pid do
+            %{
+              on_message_delta: fn _chain, delta ->
+                if delta.content && delta.content != "" do
+                  send(caller_pid, {:stream_delta, node_id, delta.content})
+                end
               end
-            end
-          }
-        else
-          %{}
+            }
+          else
+            %{}
+          end
+
+        # Filter out system messages from input - agent defines its own system prompt
+        filtered_messages =
+          messages
+          |> List.wrap()
+          |> Enum.reject(fn msg -> msg.role == :system end)
+
+        # Build the chain
+        chain =
+          %{llm: llm_config}
+          |> LLMChain.new!()
+          |> LLMChain.add_message(Message.new_system!(system_prompt))
+          |> LLMChain.add_messages(filtered_messages)
+
+        # Add tools if present
+        chain =
+          if tools != [] and tools != nil do
+            LLMChain.add_tools(chain, tools)
+          else
+            chain
+          end
+
+        # Add callback handler
+        chain = LLMChain.add_callback(chain, handler)
+
+        # Run the chain
+        case LLMChain.run(chain, mode: :while_needs_response) do
+          {:ok, updated_chain} ->
+            # Get the last assistant message
+            last_message = updated_chain.last_message
+            response_text = extract_message_content(last_message)
+
+            # Get all messages for output
+            messages_out = updated_chain.messages
+
+            # Get tool calls if any
+            tool_calls =
+              if last_message && last_message.tool_calls do
+                last_message.tool_calls
+              else
+                []
+              end
+
+            {:ok,
+             %{
+               0 => response_text,
+               1 => messages_out,
+               2 => tool_calls
+             }}
+
+          {:error, _chain, %LangChain.LangChainError{message: message}} ->
+            {:error, "Agent execution failed: #{message}"}
+
+          {:error, _chain, error} ->
+            {:error, "Agent execution failed: #{inspect(error)}"}
+
+          {:error, reason} ->
+            {:error, "Agent execution failed: #{inspect(reason)}"}
         end
-
-      # Filter out system messages from input - agent defines its own system prompt
-      filtered_messages =
-        messages
-        |> List.wrap()
-        |> Enum.reject(fn msg -> msg.role == :system end)
-
-      # Build the chain
-      chain =
-        %{llm: llm_config}
-        |> LLMChain.new!()
-        |> LLMChain.add_message(Message.new_system!(system_prompt))
-        |> LLMChain.add_messages(filtered_messages)
-
-      # Add tools if present
-      chain =
-        if tools != [] and tools != nil do
-          LLMChain.add_tools(chain, tools)
-        else
-          chain
-        end
-
-      # Add callback handler
-      chain = LLMChain.add_callback(chain, handler)
-
-      # Run the chain
-      case LLMChain.run(chain, mode: :while_needs_response) do
-        {:ok, updated_chain} ->
-          # Get the last assistant message
-          last_message = updated_chain.last_message
-          response_text = extract_message_content(last_message)
-
-          # Get all messages for output
-          messages_out = updated_chain.messages
-
-          # Get tool calls if any
-          tool_calls =
-            if last_message && last_message.tool_calls do
-              last_message.tool_calls
-            else
-              []
-            end
-
-          {:ok,
-           %{
-             0 => response_text,
-             1 => messages_out,
-             2 => tool_calls
-           }}
-
-        {:error, _chain, %LangChain.LangChainError{message: message}} ->
-          {:error, "Agent execution failed: #{message}"}
-
-        {:error, _chain, error} ->
-          {:error, "Agent execution failed: #{inspect(error)}"}
-
-        {:error, reason} ->
-          {:error, "Agent execution failed: #{inspect(reason)}"}
       end
     end
   end
@@ -353,15 +360,23 @@ defmodule Play.NodeExecutors do
 
   # Message input node - returns a user message from runtime input
   # The message content is injected via context[:message_inputs][node_id] at execution time
+  # In preview mode, returns nil (treated as not connected)
   def execute("input/message_input", node, _inputs, _properties, context) do
-    node_id = node["id"]
-    message_inputs = Map.get(context, :message_inputs, %{})
-    content = Map.get(message_inputs, node_id, "")
+    preview_mode = Map.get(context, :preview, false)
 
-    # Use dummy message if content is empty to allow workflow to continue
-    actual_content = if content == "" or content == nil, do: "No user message", else: content
-    message = Message.new_user!(actual_content)
-    {:ok, %{0 => message}}
+    # In preview mode, return nil so this node is treated as not connected
+    if preview_mode do
+      {:ok, %{0 => nil}}
+    else
+      node_id = node["id"]
+      message_inputs = Map.get(context, :message_inputs, %{})
+      content = Map.get(message_inputs, node_id, "")
+
+      # Use dummy message if content is empty to allow workflow to continue
+      actual_content = if content == "" or content == nil, do: "No user message", else: content
+      message = Message.new_user!(actual_content)
+      {:ok, %{0 => message}}
+    end
   end
 
   # ============================================================================
@@ -468,20 +483,29 @@ defmodule Play.NodeExecutors do
   end
 
   # Save Conversation node - saves messages to the database
+  # In preview mode, does nothing (treated as not connected)
   def execute("storage/save_conversation", _node, inputs, properties, context) do
-    messages = Map.get(inputs, 0, [])
-    conversation_id = Map.get(properties, "conversation_id")
-    new_name = Map.get(properties, "new_name", "New Conversation")
-    mode = Map.get(properties, "mode", "override")
-    auto_save = Map.get(properties, "auto_save", false)
-    user_profile = Map.get(context, :user_profile)
+    preview_mode = Map.get(context, :preview, false)
 
-    # Only save if auto_save is enabled
-    if auto_save do
-      do_save_conversation(user_profile, conversation_id, new_name, mode, messages)
-    else
-      Logger.info("[Save Conversation] Auto-save disabled, skipping save")
+    # In preview mode, skip entirely
+    if preview_mode do
+      Logger.debug("[Save Conversation] Preview mode, skipping")
       {:ok, %{}}
+    else
+      messages = Map.get(inputs, 0, [])
+      conversation_id = Map.get(properties, "conversation_id")
+      new_name = Map.get(properties, "new_name", "New Conversation")
+      mode = Map.get(properties, "mode", "override")
+      auto_save = Map.get(properties, "auto_save", false)
+      user_profile = Map.get(context, :user_profile)
+
+      # Only save if auto_save is enabled
+      if auto_save do
+        do_save_conversation(user_profile, conversation_id, new_name, mode, messages)
+      else
+        Logger.info("[Save Conversation] Auto-save disabled, skipping save")
+        {:ok, %{}}
+      end
     end
   end
 

@@ -1,7 +1,7 @@
-defmodule PlayWeb.GraphLive do
+defmodule PlayWeb.AgentLive do
   use PlayWeb, :live_view
 
-  alias Play.Graphs
+  alias Play.Agents
   alias Play.Web.Live.Nodes
   alias Play.WorkflowExecutor
 
@@ -10,50 +10,51 @@ defmodule PlayWeb.GraphLive do
   require Logger
 
   @impl true
-  def mount(%{"graph_id" => graph_id}, _session, socket) do
+  def mount(%{"agent_id" => agent_id}, _session, socket) do
     profile = socket.assigns.current_scope.profile
 
-    case Graphs.get_graph(profile, graph_id) do
+    case Agents.get_agent(profile, agent_id) do
       nil ->
         socket =
           socket
-          |> put_flash(:error, "Graph not found")
-          |> push_navigate(to: ~p"/graph")
+          |> put_flash(:error, "Agent not found")
+          |> push_navigate(to: ~p"/agent")
 
         {:ok, socket}
 
-      graph ->
-        graph_data = if graph.data == %{}, do: nil, else: graph.data
-        message_input_nodes = extract_message_input_nodes(graph_data)
-        conversation_display_nodes = extract_conversation_display_nodes(graph_data)
+      agent ->
+        agent_data = if agent.data == %{}, do: nil, else: agent.data
+        message_input_nodes = extract_message_input_nodes(agent_data)
+        conversation_display_nodes = extract_conversation_display_nodes(agent_data)
 
         socket =
           socket
-          |> assign(:graph, graph)
-          |> assign(:graph_state, graph_data)
+          |> assign(:agent, agent)
+          |> assign(:agent_state, agent_data)
           |> assign(:selected_node, nil)
-          |> assign(:node_count, length(graph_data["nodes"] || []))
-          |> assign(:link_count, length(graph_data["links"] || []))
+          |> assign(:node_count, length(agent_data["nodes"] || []))
+          |> assign(:link_count, length(agent_data["links"] || []))
           |> assign(:node_types, Nodes.node_types())
           |> assign(:execution_status, :idle)
           |> assign(:editing_name, false)
-          |> assign(:page_title, graph.name)
+          |> assign(:page_title, agent.name)
           |> assign(:message_input_nodes, message_input_nodes)
           |> assign(:message_inputs, %{})
           |> assign(:conversation_display_nodes, conversation_display_nodes)
           |> assign(:conversation_data, %{})
           |> assign(:execution_outputs, %{})
           |> assign(:streaming_content, %{})
+          |> assign(:preview_timer, nil)
 
         {:ok, socket}
     end
   end
 
-  # Extracts message_input nodes from graph data for sidebar display
+  # Extracts message_input nodes from agent data for sidebar display
   defp extract_message_input_nodes(nil), do: []
 
-  defp extract_message_input_nodes(graph_data) do
-    (graph_data["nodes"] || [])
+  defp extract_message_input_nodes(agent_data) do
+    (agent_data["nodes"] || [])
     |> Enum.filter(fn node -> node["type"] == "input/message_input" end)
     |> Enum.map(fn node ->
       %{
@@ -63,11 +64,11 @@ defmodule PlayWeb.GraphLive do
     end)
   end
 
-  # Extracts conversation_display nodes from graph data for sidebar display
+  # Extracts conversation_display nodes from agent data for sidebar display
   defp extract_conversation_display_nodes(nil), do: []
 
-  defp extract_conversation_display_nodes(graph_data) do
-    (graph_data["nodes"] || [])
+  defp extract_conversation_display_nodes(agent_data) do
+    (agent_data["nodes"] || [])
     |> Enum.filter(fn node -> node["type"] == "output/conversation_display" end)
     |> Enum.map(fn node ->
       %{
@@ -136,12 +137,12 @@ defmodule PlayWeb.GraphLive do
           >
           </canvas>
           <div class="absolute top-4 left-4 flex items-center gap-4">
-            <.link navigate={~p"/graph"} class="btn btn-ghost btn-sm">
+            <.link navigate={~p"/agent"} class="btn btn-ghost btn-sm">
               <.icon name="hero-arrow-left" class="w-4 h-4" /> Back
             </.link>
 
             <div :if={!@editing_name} class="flex items-center gap-2">
-              <h1 class="text-lg font-semibold">{@graph.name}</h1>
+              <h1 class="text-lg font-semibold">{@agent.name}</h1>
               <button phx-click="start_editing_name" class="btn btn-ghost btn-xs btn-square">
                 <.icon name="hero-pencil" class="w-3 h-3" />
               </button>
@@ -151,7 +152,7 @@ defmodule PlayWeb.GraphLive do
               <input
                 type="text"
                 name="name"
-                value={@graph.name}
+                value={@agent.name}
                 class="input input-sm input-bordered w-64"
                 autofocus
                 phx-keydown="cancel_editing_name"
@@ -189,12 +190,12 @@ defmodule PlayWeb.GraphLive do
                 @execution_status == :running && "btn-disabled"
               ]}
             >
-              <.icon name="hero-play" class="w-5 h-5" /> Run Workflow
+              <.icon name="hero-play" class="w-5 h-5" /> Run Agent
             </button>
           </div>
 
           <div class="absolute bottom-4 left-4 bg-base-200/90 p-3 rounded-lg text-sm">
-            <p class="font-semibold mb-1">Graph Stats</p>
+            <p class="font-semibold mb-1">Agent Stats</p>
             <p>Nodes: {@node_count} | Links: {@link_count}</p>
           </div>
         </div>
@@ -224,45 +225,54 @@ defmodule PlayWeb.GraphLive do
               </h2>
             </div>
 
-            <%!-- Streaming Content --%>
-            <div
-              :if={map_size(@streaming_content) > 0}
-              class="p-3 border-b border-base-300 bg-base-100"
-            >
-              {render_all_streaming_content(assigns)}
-            </div>
-
             <%!-- Conversation Panels --%>
             <%= if map_size(@conversation_data) == 1 do %>
               <%!-- Single conversation: full height, no accordion --%>
               <% [{_node_id, conv_data}] = Enum.to_list(@conversation_data) %>
-              <div class="flex-1 overflow-y-auto p-3 space-y-3">
+              <div id="conversation-scroll" class="flex-1 overflow-y-auto p-3 space-y-3">
                 {render_conversation_messages(assigns, conv_data.messages)}
+                <%!-- Streaming Content at the bottom --%>
+                <div :if={map_size(@streaming_content) > 0}>
+                  {render_all_streaming_content(assigns)}
+                </div>
               </div>
             <% else %>
-              <%!-- Multiple conversations: use accordion --%>
-              <div class="flex-1 overflow-y-auto">
-                <%= for {{_node_id, conv_data}, idx} <- Enum.with_index(@conversation_data) do %>
-                  <div class="collapse collapse-arrow bg-base-100 border-b border-base-300">
-                    <input
-                      type="radio"
-                      name="conversation-accordion"
-                      checked={idx == 0}
-                    />
-                    <div class="collapse-title font-medium text-sm">
-                      {conv_data.label}
-                      <span class="badge badge-sm badge-ghost ml-2">
-                        {length(conv_data.messages)} messages
-                      </span>
-                    </div>
-                    <div class="collapse-content p-0">
-                      <div class="p-3 space-y-3 max-h-[60vh] overflow-y-auto">
-                        {render_conversation_messages(assigns, conv_data.messages)}
+              <%= if map_size(@conversation_data) == 0 do %>
+                <%!-- No conversation data, just streaming --%>
+                <div class="flex-1 overflow-y-auto p-3 space-y-3">
+                  <div :if={map_size(@streaming_content) > 0}>
+                    {render_all_streaming_content(assigns)}
+                  </div>
+                </div>
+              <% else %>
+                <%!-- Multiple conversations: use accordion --%>
+                <div class="flex-1 overflow-y-auto">
+                  <%= for {{_node_id, conv_data}, idx} <- Enum.with_index(@conversation_data) do %>
+                    <div class="collapse collapse-arrow bg-base-100 border-b border-base-300">
+                      <input
+                        type="radio"
+                        name="conversation-accordion"
+                        checked={idx == 0}
+                      />
+                      <div class="collapse-title font-medium text-sm">
+                        {conv_data.label}
+                        <span class="badge badge-sm badge-ghost ml-2">
+                          {length(conv_data.messages)} messages
+                        </span>
+                      </div>
+                      <div class="collapse-content p-0">
+                        <div class="p-3 space-y-3 max-h-[60vh] overflow-y-auto">
+                          {render_conversation_messages(assigns, conv_data.messages)}
+                        </div>
                       </div>
                     </div>
+                  <% end %>
+                  <%!-- Streaming Content at the bottom for multiple conversations --%>
+                  <div :if={map_size(@streaming_content) > 0} class="p-3 border-t border-base-300">
+                    {render_all_streaming_content(assigns)}
                   </div>
-                <% end %>
-              </div>
+                </div>
+              <% end %>
             <% end %>
           </div>
         </div>
@@ -523,7 +533,7 @@ defmodule PlayWeb.GraphLive do
   # Event Handlers
   # ============================================================================
 
-  # Hook is ready - register all node types and load saved graph or add sample nodes
+  # Hook is ready - register all node types and load saved agent or add sample nodes
   @impl true
   def handle_event("hook_ready", _params, socket) do
     Logger.info("Hook ready, registering #{length(socket.assigns.node_types)} node types")
@@ -534,12 +544,12 @@ defmodule PlayWeb.GraphLive do
 
     socket = push_event(socket, "register_node_types", %{types: node_types})
 
-    # If we have a saved graph, load it; otherwise create sample nodes
+    # If we have a saved agent, load it; otherwise create sample nodes
     socket =
-      if socket.assigns.graph_state do
-        node_count = length(socket.assigns.graph_state["nodes"] || [])
+      if socket.assigns.agent_state do
+        node_count = length(socket.assigns.agent_state["nodes"] || [])
         Logger.info("Loading saved workflow with #{node_count} nodes")
-        push_event(socket, "load_graph", %{graph_data: socket.assigns.graph_state})
+        push_event(socket, "load_graph", %{graph_data: socket.assigns.agent_state})
       else
         Logger.info("No saved workflow found")
         socket
@@ -548,45 +558,54 @@ defmodule PlayWeb.GraphLive do
     {:noreply, socket}
   end
 
-  # Handle full graph state changes - save to database
+  # Handle full agent state changes - save to database
   @impl true
-  def handle_event("graph_state_changed", %{"trigger" => trigger, "graph" => graph_data}, socket) do
-    Logger.debug("Graph state changed: #{trigger}")
+  def handle_event("graph_state_changed", %{"trigger" => trigger, "graph" => agent_data}, socket) do
+    Logger.debug("Agent state changed: #{trigger}")
 
-    node_count = length(graph_data["nodes"] || [])
-    link_count = length(graph_data["links"] || [])
-    message_input_nodes = extract_message_input_nodes(graph_data)
-    conversation_display_nodes = extract_conversation_display_nodes(graph_data)
+    node_count = length(agent_data["nodes"] || [])
+    link_count = length(agent_data["links"] || [])
+    message_input_nodes = extract_message_input_nodes(agent_data)
+    conversation_display_nodes = extract_conversation_display_nodes(agent_data)
 
-    # Skip the initial empty graph state if we have a saved graph to load
+    # Skip the initial empty agent state if we have a saved agent to load
     # This prevents the JS initialization from overwriting our saved state
-    if trigger == "graph_initialized" and socket.assigns.graph_state != nil do
-      Logger.debug("Skipping graph_initialized - will load saved graph")
+    if trigger == "graph_initialized" and socket.assigns.agent_state != nil do
+      Logger.debug("Skipping graph_initialized - will load saved agent")
       {:noreply, socket}
     else
-      # Save the graph state to database
-      graph = socket.assigns.graph
+      # Save the agent state to database
+      agent = socket.assigns.agent
 
       socket =
-        case Graphs.update_graph(graph, %{data: graph_data}) do
-          {:ok, updated_graph} ->
+        case Agents.update_agent(agent, %{data: agent_data}) do
+          {:ok, updated_agent} ->
             socket
-            |> assign(:graph, updated_graph)
-            |> assign(:graph_state, graph_data)
+            |> assign(:agent, updated_agent)
+            |> assign(:agent_state, agent_data)
             |> assign(:node_count, node_count)
             |> assign(:link_count, link_count)
             |> assign(:message_input_nodes, message_input_nodes)
             |> assign(:conversation_display_nodes, conversation_display_nodes)
 
           {:error, _changeset} ->
-            Logger.error("Failed to save graph to database")
+            Logger.error("Failed to save agent to database")
 
             socket
-            |> assign(:graph_state, graph_data)
+            |> assign(:agent_state, agent_data)
             |> assign(:node_count, node_count)
             |> assign(:link_count, link_count)
             |> assign(:message_input_nodes, message_input_nodes)
             |> assign(:conversation_display_nodes, conversation_display_nodes)
+        end
+
+      # Trigger preview on structural agent changes only
+      # Skip: node_moved (visual only), node_properties_updated (from execution results)
+      socket =
+        if trigger not in ["node_moved", "node_properties_updated"] do
+          schedule_preview(socket)
+        else
+          socket
         end
 
       {:noreply, socket}
@@ -606,20 +625,20 @@ defmodule PlayWeb.GraphLive do
 
   @impl true
   def handle_event("save_name", %{"name" => name}, socket) do
-    graph = socket.assigns.graph
+    agent = socket.assigns.agent
 
-    case Graphs.update_graph(graph, %{name: name}) do
-      {:ok, updated_graph} ->
+    case Agents.update_agent(agent, %{name: name}) do
+      {:ok, updated_agent} ->
         socket =
           socket
-          |> assign(:graph, updated_graph)
+          |> assign(:agent, updated_agent)
           |> assign(:editing_name, false)
-          |> assign(:page_title, updated_graph.name)
+          |> assign(:page_title, updated_agent.name)
 
         {:noreply, socket}
 
       {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed to update graph name")}
+        {:noreply, put_flash(socket, :error, "Failed to update agent name")}
     end
   end
 
@@ -684,18 +703,20 @@ defmodule PlayWeb.GraphLive do
   # Handle property changed
   @impl true
   def handle_event("property_changed", params, socket) do
-    Logger.info(
+    Logger.debug(
       "Property changed on node #{params["node_id"]}: #{params["property"]} = #{inspect(params["value"])}"
     )
 
+    # Preview is triggered via graph_state_changed which follows property changes
     {:noreply, socket}
   end
 
-  # Handle graph loaded
+  # Handle agent loaded
   @impl true
   def handle_event("graph_loaded", params, socket) do
-    Logger.info("Graph loaded with #{params["node_count"]} nodes")
-    {:noreply, socket}
+    Logger.info("Agent loaded with #{params["node_count"]} nodes")
+    # Trigger preview execution to display any loaded conversations
+    {:noreply, schedule_preview(socket)}
   end
 
   # Handle run workflow button click
@@ -704,11 +725,11 @@ defmodule PlayWeb.GraphLive do
     if socket.assigns.execution_status == :running do
       {:noreply, socket}
     else
-      # Request the current graph from JS for execution
+      # Request the current agent from JS for execution
+      # Keep conversation_data visible, only clear streaming content for fresh stream
       socket =
         socket
         |> assign(:execution_status, :running)
-        |> assign(:conversation_data, %{})
         |> assign(:streaming_content, %{})
         |> push_event("request_execution", %{})
 
@@ -739,11 +760,11 @@ defmodule PlayWeb.GraphLive do
     if socket.assigns.execution_status == :running do
       {:noreply, socket}
     else
-      # Request the current graph from JS for execution with message inputs
+      # Request the current agent from JS for execution with message inputs
+      # Keep conversation_data visible, only clear streaming content for fresh stream
       socket =
         socket
         |> assign(:execution_status, :running)
-        |> assign(:conversation_data, %{})
         |> assign(:streaming_content, %{})
         |> push_event("request_execution", %{})
 
@@ -751,18 +772,35 @@ defmodule PlayWeb.GraphLive do
     end
   end
 
-  # Handle execution request with graph data from JS
+  # Handle execution request with agent data from JS
   @impl true
-  def handle_event("execute_workflow", %{"graph" => graph}, socket) do
-    Logger.info("Starting workflow execution with #{length(graph["nodes"] || [])} nodes")
+  def handle_event("execute_workflow", %{"graph" => agent_data}, socket) do
+    Logger.info("Starting workflow execution with #{length(agent_data["nodes"] || [])} nodes")
 
     # Start async execution with message inputs and user profile
     message_inputs = socket.assigns.message_inputs
     user_profile = socket.assigns.current_scope.profile
 
-    WorkflowExecutor.execute_async(graph, self(),
+    WorkflowExecutor.execute_async(agent_data, self(),
       message_inputs: message_inputs,
       user_profile: user_profile
+    )
+
+    {:noreply, socket}
+  end
+
+  # Handle preview execution request with agent data from JS
+  @impl true
+  def handle_event("execute_preview", %{"graph" => agent_data}, socket) do
+    Logger.info("Starting preview execution with #{length(agent_data["nodes"] || [])} nodes")
+
+    # Start async preview execution (no LLM calls)
+    user_profile = socket.assigns.current_scope.profile
+
+    WorkflowExecutor.execute_async(agent_data, self(),
+      message_inputs: %{},
+      user_profile: user_profile,
+      preview: true
     )
 
     {:noreply, socket}
@@ -784,12 +822,12 @@ defmodule PlayWeb.GraphLive do
       "Manual save conversation: node=#{node_id}, conv=#{conversation_id}, mode=#{mode}"
     )
 
-    # Get the current graph to find connected messages
-    graph = socket.assigns.graph
+    # Get the current agent to find connected messages
+    agent = socket.assigns.agent
     execution_outputs = socket.assigns.execution_outputs
 
     # Find the save node and its input connection (use stored execution outputs)
-    messages = get_connected_messages(graph, node_id, execution_outputs)
+    messages = get_connected_messages(agent, node_id, execution_outputs)
 
     if messages == [] do
       Logger.warning("No messages found for save conversation node #{node_id}")
@@ -879,10 +917,10 @@ defmodule PlayWeb.GraphLive do
 
   # Get messages from the node connected to a save conversation node's input
   # Uses stored execution outputs first, falls back to node properties
-  defp get_connected_messages(graph, save_node_id, execution_outputs) do
-    graph_data = if is_struct(graph, Play.Graph), do: graph.data, else: graph
-    nodes = graph_data["nodes"] || []
-    links = graph_data["links"] || []
+  defp get_connected_messages(agent, save_node_id, execution_outputs) do
+    agent_data = if is_struct(agent, Play.Agent), do: agent.data, else: agent
+    nodes = agent_data["nodes"] || []
+    links = agent_data["links"] || []
 
     # Find the link connected to the save node's input (slot 0)
     connected_link =
@@ -985,6 +1023,25 @@ defmodule PlayWeb.GraphLive do
   # ============================================================================
   # Execution Progress Handlers (handle_info)
   # ============================================================================
+
+  # Handle preview trigger (debounced)
+  @impl true
+  def handle_info(:trigger_preview, socket) do
+    Logger.info("Triggering preview execution")
+
+    # Clear the timer reference
+    socket = assign(socket, :preview_timer, nil)
+
+    # Don't run preview if a full execution is already running
+    if socket.assigns.execution_status == :running do
+      Logger.debug("Skipping preview - full execution already running")
+      {:noreply, socket}
+    else
+      # Request the current agent from JS for preview execution
+      socket = push_event(socket, "request_preview", %{})
+      {:noreply, socket}
+    end
+  end
 
   @impl true
   def handle_info({:node_executing, node_id}, socket) do
@@ -1118,7 +1175,7 @@ defmodule PlayWeb.GraphLive do
   end
 
   @doc """
-  Add a node to the graph.
+  Add a node to the agent.
   """
   def add_node(socket, type, opts \\ []) do
     push_event(socket, "add_node", %{
@@ -1141,7 +1198,7 @@ defmodule PlayWeb.GraphLive do
   end
 
   @doc """
-  Clear the entire graph.
+  Clear the entire agent.
   """
   def clear_graph(socket) do
     push_event(socket, "clear_graph", %{})
@@ -1152,5 +1209,26 @@ defmodule PlayWeb.GraphLive do
   """
   def load_graph(socket, graph_data) do
     push_event(socket, "load_graph", %{graph_data: graph_data})
+  end
+
+  # ============================================================================
+  # Preview Execution
+  # ============================================================================
+
+  # Debounce interval for preview execution (in milliseconds)
+  @preview_debounce_ms 300
+
+  # Schedule a preview execution with debouncing
+  # If a preview is already scheduled, cancels it and schedules a new one
+  defp schedule_preview(socket) do
+    # Cancel any pending preview
+    if socket.assigns[:preview_timer] do
+      Process.cancel_timer(socket.assigns.preview_timer)
+    end
+
+    # Schedule new preview after debounce interval
+    timer_ref = Process.send_after(self(), :trigger_preview, @preview_debounce_ms)
+
+    assign(socket, :preview_timer, timer_ref)
   end
 end

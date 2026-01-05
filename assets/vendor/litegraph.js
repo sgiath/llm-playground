@@ -43,6 +43,7 @@
         WIDGET_OUTLINE_COLOR: "#666",
         WIDGET_TEXT_COLOR: "#DDD",
         WIDGET_SECONDARY_TEXT_COLOR: "#999",
+        WIDGET_MARGIN: 12,
 
         LINK_COLOR: "#9A9",
         EVENT_LINK_COLOR: "#A86",
@@ -3724,11 +3725,11 @@
         if (this.widgets && this.widgets.length) {
             for (var i = 0, l = this.widgets.length; i < l; ++i) {
                 if (this.widgets[i].computeSize)
-                    widgets_height += this.widgets[i].computeSize(size[0])[1] + 4;
+                    widgets_height += this.widgets[i].computeSize(size[0])[1] + 8;  // Match spacing
                 else
-                    widgets_height += LiteGraph.NODE_WIDGET_HEIGHT + 4;
+                    widgets_height += LiteGraph.NODE_WIDGET_HEIGHT + 8;  // Match spacing
             }
-            widgets_height += 8;
+            widgets_height += 10;  // Bottom padding
         }
 
         //compute height using widgets height
@@ -9873,7 +9874,7 @@ LGraphNode.prototype.executeAction = function(action)
         }
         var width = node.size[0];
         var widgets = node.widgets;
-        posY += 2;
+        posY += 6;  // More top padding
         var H = LiteGraph.NODE_WIDGET_HEIGHT;
         var show_text = this.ds.scale > 0.5;
         ctx.save();
@@ -9882,7 +9883,7 @@ LGraphNode.prototype.executeAction = function(action)
         var background_color = LiteGraph.WIDGET_BGCOLOR;
         var text_color = LiteGraph.WIDGET_TEXT_COLOR;
 		var secondary_text_color = LiteGraph.WIDGET_SECONDARY_TEXT_COLOR;
-        var margin = 15;
+        var margin = LiteGraph.WIDGET_MARGIN || 12;  // Configurable margin
 
         for (var i = 0; i < widgets.length; ++i) {
             var w = widgets[i];
@@ -10077,7 +10078,7 @@ LGraphNode.prototype.executeAction = function(action)
                     }
                     break;
             }
-            posY += (w.computeSize ? w.computeSize(widget_width)[1] : H) + 4;
+            posY += (w.computeSize ? w.computeSize(widget_width)[1] : H) + 8;  // More spacing between widgets
 			ctx.globalAlpha = this.editor_alpha;
 
         }

@@ -93,7 +93,7 @@ defmodule Play.Web.Live.Nodes do
           }
         }
       ],
-      size: [200, 140],
+      size: [200, 170],
       color: "#10a37f",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -142,7 +142,7 @@ defmodule Play.Web.Live.Nodes do
           }
         }
       ],
-      size: [220, 140],
+      size: [220, 170],
       color: "#cc785c",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -190,7 +190,7 @@ defmodule Play.Web.Live.Nodes do
           }
         }
       ],
-      size: [200, 140],
+      size: [200, 170],
       color: "#4285f4",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -244,7 +244,7 @@ defmodule Play.Web.Live.Nodes do
           }
         }
       ],
-      size: [220, 140],
+      size: [220, 170],
       color: "#ffffff",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -300,7 +300,7 @@ defmodule Play.Web.Live.Nodes do
       ],
       # Hide "System Prompt" widget when "system" input is connected
       hide_widget_on_input: %{"system" => "System Prompt"},
-      size: [280, 150],
+      size: [280, 200],
       color: "#9333ea",
       bgcolor: "#1e1e2f",
       execute_code: """
@@ -350,7 +350,7 @@ defmodule Play.Web.Live.Nodes do
           options: %{multiline: true}
         }
       ],
-      size: [220, 80],
+      size: [220, 100],
       color: "#22c55e",
       bgcolor: "#1a1a2e",
       execute_code: "return properties.value;"
@@ -379,7 +379,7 @@ defmodule Play.Web.Live.Nodes do
           options: %{step: 1}
         }
       ],
-      size: [180, 60],
+      size: [180, 80],
       color: "#22c55e",
       bgcolor: "#1a1a2e",
       execute_code: "return properties.value;"
@@ -411,7 +411,7 @@ defmodule Play.Web.Live.Nodes do
           default: ""
         }
       ],
-      size: [180, 90],
+      size: [180, 120],
       color: "#22c55e",
       bgcolor: "#1a1a2e",
       execute_code: "return properties.default_value;"
@@ -437,7 +437,7 @@ defmodule Play.Web.Live.Nodes do
           default: "User Message"
         }
       ],
-      size: [200, 60],
+      size: [200, 80],
       color: "#22c55e",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -460,7 +460,7 @@ defmodule Play.Web.Live.Nodes do
       category: "output",
       inputs: [%{name: "value", type: nil}],
       properties: [%{name: "value", default: ""}],
-      size: [300, 80],
+      size: [300, 100],
       color: "#f59e0b",
       bgcolor: "#1a1a2e",
       resizable: true,
@@ -488,7 +488,7 @@ defmodule Play.Web.Live.Nodes do
           default: ""
         }
       ],
-      size: [180, 60],
+      size: [180, 80],
       color: "#f59e0b",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -515,7 +515,7 @@ defmodule Play.Web.Live.Nodes do
           default: "Conversation"
         }
       ],
-      size: [200, 60],
+      size: [200, 80],
       color: "#f59e0b",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -559,7 +559,7 @@ defmodule Play.Web.Live.Nodes do
       ],
       # Hide "Content" widget when "content" input is connected
       hide_widget_on_input: %{"content" => "Content"},
-      size: [200, 90],
+      size: [200, 120],
       color: "#6366f1",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -582,7 +582,7 @@ defmodule Play.Web.Live.Nodes do
       ],
       outputs: [%{name: "messages", type: "messages"}],
       properties: [%{name: "input_count", default: 1}],
-      size: [160, 80],
+      size: [160, 100],
       color: "#6366f1",
       bgcolor: "#1a1a2e",
       # Enable dynamic inputs - the JS hook will add menu options to add/remove
@@ -656,7 +656,7 @@ defmodule Play.Web.Live.Nodes do
           default: "var3"
         }
       ],
-      size: [240, 150],
+      size: [240, 210],
       color: "#6366f1",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -682,7 +682,7 @@ defmodule Play.Web.Live.Nodes do
       category: "utility",
       inputs: [%{name: "text", type: "text"}],
       outputs: [%{name: "object", type: nil}],
-      size: [160, 50],
+      size: [160, 60],
       color: "#6366f1",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -718,7 +718,7 @@ defmodule Play.Web.Live.Nodes do
           default: false
         }
       ],
-      size: [160, 70],
+      size: [160, 100],
       color: "#6366f1",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -752,10 +752,10 @@ defmodule Play.Web.Live.Nodes do
           name: "Max Results",
           property: "max_results",
           default: 10,
-          options: %{min: 1, max: 20, step: 1}
+          options: %{min: 1, max: 20, step: 1, precision: 0}
         }
       ],
-      size: [200, 70],
+      size: [200, 90],
       color: "#ec4899",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -795,7 +795,7 @@ defmodule Play.Web.Live.Nodes do
       ],
       outputs: [%{name: "tools", type: "tools"}],
       properties: [%{name: "input_count", default: 1}],
-      size: [160, 60],
+      size: [160, 70],
       color: "#ec4899",
       bgcolor: "#1a1a2e",
       # Enable dynamic inputs - the JS hook will add menu options to add/remove
@@ -849,9 +849,14 @@ defmodule Play.Web.Live.Nodes do
             dynamic: true,
             dynamic_source: "conversations"
           }
+        },
+        %{
+          type: "button",
+          name: "Edit Conversation",
+          callback: "editConversation"
         }
       ],
-      size: [240, 80],
+      size: [240, 140],
       color: "#06b6d4",
       bgcolor: "#1a1a2e",
       execute_code: """
@@ -921,7 +926,7 @@ defmodule Play.Web.Live.Nodes do
       hide_widget_on_property: %{"conversation_id" => %{widget: "Name", hide_when_not: "__new__"}},
       # Hide "Save" button when auto_save is enabled
       hide_widget_on_property_true: %{"auto_save" => "Save"},
-      size: [260, 180],
+      size: [260, 240],
       color: "#06b6d4",
       bgcolor: "#1a1a2e",
       execute_code: """

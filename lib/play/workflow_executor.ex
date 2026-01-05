@@ -52,6 +52,7 @@ defmodule Play.WorkflowExecutor do
 
   ## Options
   - `:message_inputs` - Map of node_id => message_text for Message Input nodes
+  - `:preview` - When true, runs in preview mode (Agent nodes pass through messages without LLM calls)
   """
   def execute_async(graph, caller_pid, opts \\ [])
       when is_map(graph) and is_pid(caller_pid) do
@@ -80,22 +81,24 @@ defmodule Play.WorkflowExecutor do
 
   ## Options
   - `:message_inputs` - Map of node_id => message_text for Message Input nodes
+  - `:preview` - When true, runs in preview mode (Agent nodes pass through messages without LLM calls)
   """
   def execute(graph, caller_pid, opts \\ []) when is_map(graph) do
     nodes = graph["nodes"] || []
     links = graph["links"] || []
     message_inputs = Keyword.get(opts, :message_inputs, %{})
     user_profile = Keyword.get(opts, :user_profile)
+    preview = Keyword.get(opts, :preview, false)
 
     if Enum.empty?(nodes) do
       Logger.info("Empty workflow, nothing to execute")
       %{}
     else
-      execute_workflow(nodes, links, caller_pid, message_inputs, user_profile)
+      execute_workflow(nodes, links, caller_pid, message_inputs, user_profile, preview)
     end
   end
 
-  defp execute_workflow(nodes, links, caller_pid, message_inputs, user_profile) do
+  defp execute_workflow(nodes, links, caller_pid, message_inputs, user_profile, preview) do
     # Build all required data structures
     node_map = Map.new(nodes, fn node -> {node["id"], node} end)
     input_links = build_input_links(links)
@@ -110,11 +113,13 @@ defmodule Play.WorkflowExecutor do
 
     total_nodes = length(nodes)
 
+    mode = if preview, do: "preview", else: "full"
+
     Logger.info(
-      "Executing workflow with #{total_nodes} nodes, #{length(root_nodes)} root nodes: #{inspect(root_nodes)}"
+      "Executing workflow (#{mode}) with #{total_nodes} nodes, #{length(root_nodes)} root nodes: #{inspect(root_nodes)}"
     )
 
-    # Initialize execution state with message_inputs and user_profile in context
+    # Initialize execution state with message_inputs, user_profile, and preview in context
     state = %__MODULE__{
       node_map: node_map,
       input_links: input_links,
@@ -124,7 +129,8 @@ defmodule Play.WorkflowExecutor do
       context: %{
         caller_pid: caller_pid,
         message_inputs: message_inputs,
-        user_profile: user_profile
+        user_profile: user_profile,
+        preview: preview
       },
       caller_pid: caller_pid,
       total_nodes: total_nodes,

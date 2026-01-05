@@ -23,8 +23,11 @@ defmodule PlayWeb.Router do
     pipe_through [:browser, :require_authenticated_user]
 
     live_session :authenticated, on_mount: {SgiathAuth, :require_authenticated} do
-      live "/graph", GraphListLive
-      live "/graph/:graph_id", GraphLive
+      live "/agent", AgentListLive
+      live "/agent/:agent_id", AgentLive
+
+      live "/conv", ConversationListLive
+      live "/conv/:conv_id", ConversationLive
     end
   end
 

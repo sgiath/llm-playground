@@ -72,4 +72,51 @@ defmodule Play.Conversations do
   def change_conversation(%Conversation{} = conversation, attrs \\ %{}) do
     Conversation.update_changeset(conversation, attrs)
   end
+
+  @doc """
+  Updates a specific message at the given index within a conversation.
+  Returns {:ok, conversation} or {:error, changeset}.
+  """
+  def update_message(%Conversation{} = conversation, index, new_message) when is_integer(index) do
+    messages = conversation.messages
+
+    if index >= 0 and index < length(messages) do
+      updated_messages = List.replace_at(messages, index, new_message)
+      update_conversation(conversation, %{messages: updated_messages})
+    else
+      {:error, :invalid_index}
+    end
+  end
+
+  @doc """
+  Deletes a message at the given index within a conversation.
+  Returns {:ok, conversation} or {:error, changeset}.
+  """
+  def delete_message(%Conversation{} = conversation, index) when is_integer(index) do
+    messages = conversation.messages
+
+    if index >= 0 and index < length(messages) do
+      updated_messages = List.delete_at(messages, index)
+      update_conversation(conversation, %{messages: updated_messages})
+    else
+      {:error, :invalid_index}
+    end
+  end
+
+  @doc """
+  Reorders messages according to the given list of indices.
+  The new_order list contains the original indices in their new positions.
+  Returns {:ok, conversation} or {:error, changeset}.
+  """
+  def reorder_messages(%Conversation{} = conversation, new_order) when is_list(new_order) do
+    messages = conversation.messages
+
+    if length(new_order) == length(messages) and
+         Enum.all?(new_order, &(&1 >= 0 and &1 < length(messages))) do
+      reordered_messages = Enum.map(new_order, fn idx -> Enum.at(messages, idx) end)
+      update_conversation(conversation, %{messages: reordered_messages})
+    else
+      {:error, :invalid_order}
+    end
+  end
 end

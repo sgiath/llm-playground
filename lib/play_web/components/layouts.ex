@@ -44,7 +44,10 @@ defmodule PlayWeb.Layouts do
       <div class="flex-none">
         <ul class="flex flex-row px-1 space-x-2 items-center">
           <li>
-            <a href="/graph" class="btn btn-ghost">Graph</a>
+            <a href="/agent" class="btn btn-ghost">Agents</a>
+          </li>
+          <li>
+            <a href="/conv" class="btn btn-ghost">Conversations</a>
           </li>
           <li>
             <.theme_toggle />

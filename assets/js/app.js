@@ -26,14 +26,48 @@ import { hooks as colocatedHooks } from "phoenix-colocated/play";
 import topbar from "../vendor/topbar";
 
 import { LitegraphHook } from "./hooks/litegraph_hook";
+import { SortableHook } from "./hooks/sortable_hook";
 
 const csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");
+
+// Scroll position preservation for stream resets
+let scrollY = 0;
+let shouldRestoreScroll = false;
+let updateBatchStarted = false;
+
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: { _csrf_token: csrfToken },
-  hooks: { ...colocatedHooks, LitegraphHook },
+  hooks: { ...colocatedHooks, LitegraphHook, SortableHook },
+  dom: {
+    onBeforeElUpdated(from, to) {
+      // Save scroll at the FIRST element update of each batch (before browser resets it)
+      // This captures scroll when the main LiveView container is first touched
+      if (!updateBatchStarted && from.id && from.id.startsWith("phx-")) {
+        scrollY = window.scrollY;
+        updateBatchStarted = true;
+      }
+      // Mark for restoration when we see the stream container being updated
+      if (from.id === "messages-container" && from.getAttribute("phx-update") === "stream") {
+        shouldRestoreScroll = true;
+      }
+      return true;
+    }
+  }
+});
+
+// Restore scroll after LiveView updates
+window.addEventListener("phx:update", () => {
+  updateBatchStarted = false;
+  if (shouldRestoreScroll) {
+    shouldRestoreScroll = false;
+    const targetScrollY = scrollY;
+    requestAnimationFrame(() => {
+      window.scrollTo(0, targetScrollY);
+    });
+  }
 });
 
 // Show progress bar on live navigation and form submits
