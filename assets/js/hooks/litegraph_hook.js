@@ -198,11 +198,11 @@ const LitegraphHook = {
       // Update all nodes that have conversation_id widgets
       this.graph._nodes.forEach((node) => {
         if (
-          node.type === "load_conversation" ||
-          node.type === "save_conversation"
+          node.type === "storage/load_conversation" ||
+          node.type === "storage/save_conversation"
         ) {
           const values =
-            node.type === "load_conversation" ? load_values : save_values;
+            node.type === "storage/load_conversation" ? load_values : save_values;
           const propName = "conversation_id";
 
           // Update the combo mapping
@@ -587,8 +587,23 @@ const LitegraphHook = {
               } else if (w.callback === "saveConversation") {
                 // Manual save conversation to database
                 const nodeId = this.id;
-                const conversationId =
-                  this.properties.conversation_id || "__new__";
+                
+                // Check if conversation input (slot 1) is connected and has a value
+                let conversationId = this.properties.conversation_id || "__new__";
+                if (this.inputs && this.inputs[1] && this.inputs[1].link !== null) {
+                  // Get the connected value from the link
+                  const link = hook.graph.links[this.inputs[1].link];
+                  if (link) {
+                    const sourceNode = hook.graph.getNodeById(link.origin_id);
+                    if (sourceNode && sourceNode.outputs && sourceNode.outputs[link.origin_slot]) {
+                      const connectedValue = sourceNode.getOutputData(link.origin_slot);
+                      if (connectedValue) {
+                        conversationId = connectedValue;
+                      }
+                    }
+                  }
+                }
+                
                 const newName = this.properties.new_name || "New Conversation";
                 const mode = this.properties.mode || "override";
 
@@ -858,7 +873,7 @@ const LitegraphHook = {
       const mapping = node._hide_widget_on_input;
       let changed = false;
 
-      for (const [inputName, widgetName] of Object.entries(mapping)) {
+      for (const [inputName, widgetNames] of Object.entries(mapping)) {
         // Find the input slot index by name
         const inputIndex = node.inputs.findIndex(
           (inp) => inp.name === inputName
@@ -868,35 +883,40 @@ const LitegraphHook = {
         // Check if this input has a connection
         const isConnected = node.inputs[inputIndex].link !== null;
 
-        // Check if widget currently exists
-        const widgetIndex = node.widgets
-          ? node.widgets.findIndex((w) => w.name === widgetName)
-          : -1;
-        const widgetExists = widgetIndex !== -1;
-        const wasRemoved = node._removed_widgets[widgetName] !== undefined;
+        // Support both single widget name (string) and array of widget names
+        const widgetNameList = Array.isArray(widgetNames) ? widgetNames : [widgetNames];
 
-        if (isConnected && widgetExists) {
-          // Remove the widget - store it first
-          const widget = node.widgets[widgetIndex];
-          node._removed_widgets[widgetName] = {
-            widget: widget,
-            index: widgetIndex,
-          };
-          node.widgets.splice(widgetIndex, 1);
-          changed = true;
-        } else if (!isConnected && wasRemoved) {
-          // Restore the widget
-          const stored = node._removed_widgets[widgetName];
-          if (stored && stored.widget) {
-            // Insert at original position or at end
-            const insertIndex = Math.min(
-              stored.index,
-              node.widgets ? node.widgets.length : 0
-            );
-            if (!node.widgets) node.widgets = [];
-            node.widgets.splice(insertIndex, 0, stored.widget);
-            delete node._removed_widgets[widgetName];
+        for (const widgetName of widgetNameList) {
+          // Check if widget currently exists
+          const widgetIndex = node.widgets
+            ? node.widgets.findIndex((w) => w.name === widgetName)
+            : -1;
+          const widgetExists = widgetIndex !== -1;
+          const wasRemoved = node._removed_widgets[widgetName] !== undefined;
+
+          if (isConnected && widgetExists) {
+            // Remove the widget - store it first
+            const widget = node.widgets[widgetIndex];
+            node._removed_widgets[widgetName] = {
+              widget: widget,
+              index: widgetIndex,
+            };
+            node.widgets.splice(widgetIndex, 1);
             changed = true;
+          } else if (!isConnected && wasRemoved) {
+            // Restore the widget
+            const stored = node._removed_widgets[widgetName];
+            if (stored && stored.widget) {
+              // Insert at original position or at end
+              const insertIndex = Math.min(
+                stored.index,
+                node.widgets ? node.widgets.length : 0
+              );
+              if (!node.widgets) node.widgets = [];
+              node.widgets.splice(insertIndex, 0, stored.widget);
+              delete node._removed_widgets[widgetName];
+              changed = true;
+            }
           }
         }
       }

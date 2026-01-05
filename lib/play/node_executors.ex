@@ -37,6 +37,7 @@ defmodule Play.NodeExecutors do
   ### Message Nodes
   - `utility/message_builder` - Creates a LangChain Message
   - `utility/messages_combiner` - Combines messages into a list
+  - `utility/text_to_part` - Converts text to a ContentPart
   - `utility/prompt_template` - String interpolation with {{var}} syntax
 
   ### Tool Nodes
@@ -195,6 +196,14 @@ defmodule Play.NodeExecutors do
 
     # Combine base messages with individual messages
     {:ok, %{0 => base_messages ++ individual_messages}}
+  end
+
+  # Text to Part node - converts text to a ContentPart
+  def execute("utility/text_to_part", _node, inputs, _properties, _context) do
+    text = Map.get(inputs, 0, "")
+    text_string = if is_binary(text), do: text, else: to_string(text)
+    part = ContentPart.text!(text_string)
+    {:ok, %{0 => part}}
   end
 
   # Prompt template node - string interpolation with {{variable}} syntax
@@ -514,9 +523,9 @@ defmodule Play.NodeExecutors do
     user_profile = Map.get(context, :user_profile)
 
     cond do
-      is_nil(conversation_id) or conversation_id == "" ->
+      is_nil(conversation_id) or conversation_id == "" or conversation_id == "__none__" ->
         Logger.info("[Load Conversation] No conversation selected, returning empty messages")
-        {:ok, %{0 => []}}
+        {:ok, %{0 => [], 1 => nil}}
 
       is_nil(user_profile) ->
         Logger.warning("[Load Conversation] No user profile in context")
@@ -526,7 +535,7 @@ defmodule Play.NodeExecutors do
         case Conversations.get_conversation(user_profile, conversation_id) do
           nil ->
             Logger.warning("[Load Conversation] Conversation #{conversation_id} not found")
-            {:ok, %{0 => []}}
+            {:ok, %{0 => [], 1 => nil}}
 
           conversation ->
             messages = MessageSerializer.deserialize_messages(conversation.messages)
@@ -535,7 +544,7 @@ defmodule Play.NodeExecutors do
               "[Load Conversation] Loaded #{length(messages)} messages from '#{conversation.name}'"
             )
 
-            {:ok, %{0 => messages}}
+            {:ok, %{0 => messages, 1 => conversation_id}}
         end
     end
   end
@@ -551,7 +560,9 @@ defmodule Play.NodeExecutors do
       {:ok, %{}}
     else
       messages = Map.get(inputs, 0, [])
-      conversation_id = Map.get(properties, "conversation_id")
+      # Conversation ID can come from input (slot 1) or property
+      conversation_input = Map.get(inputs, 1)
+      conversation_id = conversation_input || Map.get(properties, "conversation_id")
       new_name = Map.get(properties, "new_name", "New Conversation")
       mode = Map.get(properties, "mode", "override")
       auto_save = Map.get(properties, "auto_save", false)

@@ -897,6 +897,22 @@ defmodule PlayWeb.AgentLive do
       # Save the agent state to database
       agent = socket.assigns.agent
 
+      # Clean up conversation_data for removed conversation display nodes
+      valid_conv_node_ids = MapSet.new(conversation_display_nodes, & &1.id)
+
+      cleaned_conversation_data =
+        socket.assigns.conversation_data
+        |> Enum.filter(fn {node_id, _} -> MapSet.member?(valid_conv_node_ids, node_id) end)
+        |> Map.new()
+
+      # Clean up image_inputs for removed image input nodes
+      valid_image_node_ids = MapSet.new(image_input_nodes, & &1.id)
+
+      cleaned_image_inputs =
+        socket.assigns.image_inputs
+        |> Enum.filter(fn {node_id, _} -> MapSet.member?(valid_image_node_ids, node_id) end)
+        |> Map.new()
+
       socket =
         case Agents.update_agent(agent, %{data: agent_data}) do
           {:ok, updated_agent} ->
@@ -907,7 +923,9 @@ defmodule PlayWeb.AgentLive do
             |> assign(:link_count, link_count)
             |> assign(:message_input_nodes, message_input_nodes)
             |> assign(:image_input_nodes, image_input_nodes)
+            |> assign(:image_inputs, cleaned_image_inputs)
             |> assign(:conversation_display_nodes, conversation_display_nodes)
+            |> assign(:conversation_data, cleaned_conversation_data)
 
           {:error, _changeset} ->
             Logger.error("Failed to save agent to database")
@@ -918,7 +936,9 @@ defmodule PlayWeb.AgentLive do
             |> assign(:link_count, link_count)
             |> assign(:message_input_nodes, message_input_nodes)
             |> assign(:image_input_nodes, image_input_nodes)
+            |> assign(:image_inputs, cleaned_image_inputs)
             |> assign(:conversation_display_nodes, conversation_display_nodes)
+            |> assign(:conversation_data, cleaned_conversation_data)
         end
 
       # Trigger preview on structural agent changes only
@@ -1190,20 +1210,24 @@ defmodule PlayWeb.AgentLive do
   def handle_event("save_conversation_manual", params, socket) do
     %{
       "node_id" => node_id,
-      "conversation_id" => conversation_id,
+      "conversation_id" => conversation_id_from_params,
       "new_name" => new_name,
       "mode" => mode
     } = params
 
     user_profile = socket.assigns.current_scope.profile
 
-    Logger.info(
-      "Manual save conversation: node=#{node_id}, conv=#{conversation_id}, mode=#{mode}"
-    )
-
     # Get the current agent to find connected messages
     agent = socket.assigns.agent
     execution_outputs = socket.assigns.execution_outputs
+
+    # Check if conversation input (slot 1) is connected and has a value from execution
+    conversation_id_from_input = get_connected_conversation_id(agent, node_id, execution_outputs)
+    conversation_id = conversation_id_from_input || conversation_id_from_params
+
+    Logger.info(
+      "Manual save conversation: node=#{node_id}, conv=#{conversation_id}, mode=#{mode}"
+    )
 
     # Find the save node and its input connection (use stored execution outputs)
     messages = get_connected_messages(agent, node_id, execution_outputs)
@@ -1278,9 +1302,10 @@ defmodule PlayWeb.AgentLive do
     conversations = Play.Conversations.list_conversations(socket.assigns.current_scope.profile)
 
     load_values =
-      Enum.map(conversations, fn conv ->
-        %{value: conv.id, label: conv.name}
-      end)
+      [%{value: "__none__", label: "No conversation"}] ++
+        Enum.map(conversations, fn conv ->
+          %{value: conv.id, label: conv.name}
+        end)
 
     save_values =
       [%{value: "__new__", label: "Create new..."}] ++
@@ -1294,7 +1319,7 @@ defmodule PlayWeb.AgentLive do
     })
   end
 
-  # Get messages from the node connected to a save conversation node's input
+  # Get messages from the node connected to a save conversation node's input (slot 0)
   # Uses stored execution outputs first, falls back to node properties
   defp get_connected_messages(agent, save_node_id, execution_outputs) do
     agent_data = if is_struct(agent, Play.Agent), do: agent.data, else: agent
@@ -1347,15 +1372,45 @@ defmodule PlayWeb.AgentLive do
     end
   end
 
+  # Get conversation ID from the node connected to a save conversation node's input (slot 1)
+  # Returns nil if not connected or no value available
+  defp get_connected_conversation_id(agent, save_node_id, execution_outputs) do
+    agent_data = if is_struct(agent, Play.Agent), do: agent.data, else: agent
+    links = agent_data["links"] || []
+
+    # Find the link connected to the save node's conversation input (slot 1)
+    connected_link =
+      Enum.find(links, fn link ->
+        [_link_id, _from_node, _from_slot, to_node, to_slot | _rest] = link
+        to_node == save_node_id and to_slot == 1
+      end)
+
+    case connected_link do
+      nil ->
+        nil
+
+      [_link_id, from_node_id, from_slot | _rest] ->
+        # Try to get conversation ID from stored execution outputs
+        case Map.get(execution_outputs, from_node_id) do
+          %{^from_slot => conversation_id} when is_binary(conversation_id) ->
+            conversation_id
+
+          _ ->
+            nil
+        end
+    end
+  end
+
   # Inject conversation options into node types that have dynamic_source: "conversations"
   defp inject_conversation_options(node_types, user_profile) do
     conversations = Play.Conversations.list_conversations(user_profile)
 
     # Build options for both load and save nodes
     load_values =
-      Enum.map(conversations, fn conv ->
-        %{value: conv.id, label: conv.name}
-      end)
+      [%{value: "__none__", label: "No conversation"}] ++
+        Enum.map(conversations, fn conv ->
+          %{value: conv.id, label: conv.name}
+        end)
 
     save_values =
       [%{value: "__new__", label: "Create new..."}] ++

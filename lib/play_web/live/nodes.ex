@@ -44,6 +44,7 @@ defmodule Play.Web.Live.Nodes do
       # Utility nodes
       message_builder_node(),
       messages_combiner_node(),
+      text_to_part_node(),
       prompt_template_node(),
       json_parse_node(),
       condition_node(),
@@ -652,6 +653,26 @@ defmodule Play.Web.Live.Nodes do
     }
   end
 
+  defp text_to_part_node do
+    %{
+      type: "text_to_part",
+      title: "Text → Part",
+      description:
+        "Converts text input to a message part. Use this to connect text from other nodes (like Prompt Template) to Message Builder.",
+      category: "utility",
+      inputs: [%{name: "text", type: "text"}],
+      outputs: [%{name: "part", type: "message_part"}],
+      properties: [],
+      size: [140, 50],
+      color: "#6366f1",
+      bgcolor: "#1a1a2e",
+      execute_code: """
+      const text = inputs[0] || '';
+      return { type: 'text', content: String(text) };
+      """
+    }
+  end
+
   defp prompt_template_node do
     %{
       type: "prompt_template",
@@ -870,21 +891,24 @@ defmodule Play.Web.Live.Nodes do
       type: "load_conversation",
       title: "Load Conversation",
       description:
-        "Load conversation history from the database. Select a saved conversation to restore its messages.",
+        "Load conversation history from the database. Select a saved conversation to restore its messages, or 'No conversation' to start fresh.",
       category: "storage",
       inputs: [],
-      outputs: [%{name: "messages", type: "messages"}],
+      outputs: [
+        %{name: "messages", type: "messages"},
+        %{name: "conversation", type: "conversation"}
+      ],
       properties: [
-        %{name: "conversation_id", default: nil}
+        %{name: "conversation_id", default: "__none__"}
       ],
       widgets: [
         %{
           type: "combo",
           name: "Conversation",
           property: "conversation_id",
-          default: nil,
+          default: "__none__",
           options: %{
-            values: [],
+            values: [%{value: "__none__", label: "No conversation"}],
             # Dynamic values will be populated from DB
             dynamic: true,
             dynamic_source: "conversations"
@@ -913,7 +937,10 @@ defmodule Play.Web.Live.Nodes do
       description:
         "Save conversation history to the database. Choose to create a new conversation or update an existing one.",
       category: "storage",
-      inputs: [%{name: "messages", type: "messages"}],
+      inputs: [
+        %{name: "messages", type: "messages"},
+        %{name: "conversation", type: "conversation"}
+      ],
       outputs: [],
       properties: [
         %{name: "conversation_id", default: "__new__"},
@@ -962,7 +989,9 @@ defmodule Play.Web.Live.Nodes do
           callback: "saveConversation"
         }
       ],
-      # Hide "Name" widget when not creating new conversation
+      # Hide "Conversation" and "Name" widgets when conversation input is connected
+      hide_widget_on_input: %{"conversation" => ["Conversation", "Name"]},
+      # Hide "Name" widget when not creating new conversation (only applies when conversation input not connected)
       hide_widget_on_property: %{"conversation_id" => %{widget: "Name", hide_when_not: "__new__"}},
       # Hide "Save" button when auto_save is enabled
       hide_widget_on_property_true: %{"auto_save" => "Save"},
@@ -971,10 +1000,11 @@ defmodule Play.Web.Live.Nodes do
       bgcolor: "#1a1a2e",
       execute_code: """
       const messages = inputs[0] || [];
+      const conversation_input = inputs[1];
       // Store for server-side processing
       this.properties._pending_save = {
         messages: messages,
-        conversation_id: properties.conversation_id,
+        conversation_id: conversation_input || properties.conversation_id,
         new_name: properties.new_name,
         mode: properties.mode,
         auto_save: properties.auto_save
