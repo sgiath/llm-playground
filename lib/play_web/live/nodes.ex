@@ -33,6 +33,7 @@ defmodule Play.Web.Live.Nodes do
       number_input_node(),
       variable_node(),
       message_input_node(),
+      runtime_text_input_node(),
       image_input_node(),
 
       # Output nodes
@@ -230,8 +231,7 @@ defmodule Play.Web.Live.Nodes do
       ],
       outputs: [
         %{name: "response", type: "text"},
-        %{name: "messages_out", type: "messages"},
-        %{name: "tool_calls", type: "tool_calls"}
+        %{name: "messages", type: "messages"}
       ],
       properties: [
         %{name: "system_prompt", default: "You are a helpful assistant."},
@@ -276,8 +276,7 @@ defmodule Play.Web.Live.Nodes do
       // Return current stored response (will be updated by server)
       return { 
         0: this.properties._last_response || '',
-        1: this.properties._messages_out || messages,
-        2: this.properties._tool_calls || []
+        1: this.properties._messages || messages
       };
       """
     }
@@ -402,6 +401,43 @@ defmodule Play.Web.Live.Nodes do
     }
   end
 
+  defp runtime_text_input_node do
+    %{
+      type: "runtime_text_input",
+      title: "Runtime Text",
+      description:
+        "Text input that appears in the sidebar. Can be a multiline textarea or a single-line input. Outputs plain text (not a message part).",
+      category: "input",
+      outputs: [%{name: "text", type: "text"}],
+      properties: [
+        %{name: "label", default: "Text Input"},
+        %{name: "multiline", default: true}
+      ],
+      widgets: [
+        %{
+          type: "text",
+          name: "Label",
+          property: "label",
+          default: "Text Input"
+        },
+        %{
+          type: "toggle",
+          name: "Multiline",
+          property: "multiline",
+          default: true
+        }
+      ],
+      size: [200, 110],
+      color: "#22c55e",
+      bgcolor: "#1a1a2e",
+      execute_code: """
+      // Runtime value is injected by the server during execution
+      // This returns plain text (unlike message_input which returns a ContentPart)
+      return properties._runtime_value || '';
+      """
+    }
+  end
+
   defp image_input_node do
     %{
       type: "image_input",
@@ -487,7 +523,7 @@ defmodule Play.Web.Live.Nodes do
       type: "conversation_display",
       title: "Conversation Display",
       description:
-        "Displays conversation messages in the sidebar. Connect to an Agent's messages_out output to view the full conversation with system prompts, tool calls, and token usage.",
+        "Displays conversation messages in the sidebar. Connect to an Agent's messages output to view the full conversation with system prompts, tool calls, and token usage.",
       category: "output",
       inputs: [%{name: "messages", type: "messages"}],
       properties: [%{name: "label", default: "Conversation"}],
@@ -629,58 +665,52 @@ defmodule Play.Web.Live.Nodes do
     %{
       type: "prompt_template",
       title: "Prompt Template",
-      description: "String interpolation with {{variable}} syntax",
+      description:
+        "String interpolation with {{var1}}, {{var2}}, etc. syntax. Connect a template text or use the widget. Variables are replaced by values from connected inputs in order.",
       category: "utility",
       inputs: [
-        %{name: "var1", type: "text"},
-        %{name: "var2", type: "text"},
-        %{name: "var3", type: "text"}
+        %{name: "template", type: "text"},
+        %{name: "var1", type: "text"}
       ],
       outputs: [%{name: "text", type: "text"}],
       properties: [
         %{name: "template", default: "Hello {{var1}}!"},
-        %{name: "var1_name", default: "var1"},
-        %{name: "var2_name", default: "var2"},
-        %{name: "var3_name", default: "var3"}
+        %{name: "input_count", default: 1}
       ],
       widgets: [
         %{
           type: "text",
           name: "Template",
           property: "template",
-          default: "Hello {{var1}}!"
-        },
-        %{
-          type: "text",
-          name: "Var1 Name",
-          property: "var1_name",
-          default: "var1"
-        },
-        %{
-          type: "text",
-          name: "Var2 Name",
-          property: "var2_name",
-          default: "var2"
-        },
-        %{
-          type: "text",
-          name: "Var3 Name",
-          property: "var3_name",
-          default: "var3"
+          default: "Hello {{var1}}!",
+          options: %{multiline: true}
         }
       ],
-      size: [240, 210],
+      # Hide "Template" widget when "template" input is connected
+      hide_widget_on_input: %{"template" => "Template"},
+      # Enable dynamic inputs for variable values
+      # Starting from slot 1 (slot 0 is reserved for template input)
+      dynamic_inputs: %{
+        type: "text",
+        name_prefix: "var",
+        min: 1,
+        max: 10,
+        start_slot: 1,
+        auto_add: true
+      },
+      size: [240, 120],
       color: "#6366f1",
       bgcolor: "#1a1a2e",
       execute_code: """
-      let result = properties.template;
-      const vars = {
-        [properties.var1_name]: inputs[0] || '',
-        [properties.var2_name]: inputs[1] || '',
-        [properties.var3_name]: inputs[2] || ''
-      };
-      for (const [key, value] of Object.entries(vars)) {
-        result = result.replace(new RegExp('\\\\{\\\\{' + key + '\\\\}\\\\}', 'g'), value);
+      // Get template from input slot 0, or fall back to property
+      const template = inputs[0] || properties.template || '';
+
+      // Collect all variable values from dynamic inputs (slot 1+)
+      let result = template;
+      for (let i = 1; i < inputs.length; i++) {
+        const varName = 'var' + i;
+        const varValue = inputs[i] || '';
+        result = result.replace(new RegExp('\\\\{\\\\{' + varName + '\\\\}\\\\}', 'g'), varValue);
       }
       return result;
       """

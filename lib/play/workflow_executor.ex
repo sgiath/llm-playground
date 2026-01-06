@@ -53,6 +53,7 @@ defmodule Play.WorkflowExecutor do
   ## Options
   - `:message_inputs` - Map of node_id => message_text for Message Input nodes
   - `:image_inputs` - Map of node_id => %{data: base64, media_type: string} for Image Input nodes
+  - `:runtime_text_inputs` - Map of node_id => text for Runtime Text Input nodes
   - `:preview` - When true, runs in preview mode (Agent nodes pass through messages without LLM calls)
   """
   def execute_async(graph, caller_pid, opts \\ [])
@@ -83,6 +84,7 @@ defmodule Play.WorkflowExecutor do
   ## Options
   - `:message_inputs` - Map of node_id => message_text for Message Input nodes
   - `:image_inputs` - Map of node_id => %{data: base64, media_type: string} for Image Input nodes
+  - `:runtime_text_inputs` - Map of node_id => text for Runtime Text Input nodes
   - `:preview` - When true, runs in preview mode (Agent nodes pass through messages without LLM calls)
   """
   def execute(graph, caller_pid, opts \\ []) when is_map(graph) do
@@ -90,6 +92,7 @@ defmodule Play.WorkflowExecutor do
     links = graph["links"] || []
     message_inputs = Keyword.get(opts, :message_inputs, %{})
     image_inputs = Keyword.get(opts, :image_inputs, %{})
+    runtime_text_inputs = Keyword.get(opts, :runtime_text_inputs, %{})
     user_profile = Keyword.get(opts, :user_profile)
     preview = Keyword.get(opts, :preview, false)
 
@@ -103,6 +106,7 @@ defmodule Play.WorkflowExecutor do
         caller_pid,
         message_inputs,
         image_inputs,
+        runtime_text_inputs,
         user_profile,
         preview
       )
@@ -115,6 +119,7 @@ defmodule Play.WorkflowExecutor do
          caller_pid,
          message_inputs,
          image_inputs,
+         runtime_text_inputs,
          user_profile,
          preview
        ) do
@@ -138,7 +143,7 @@ defmodule Play.WorkflowExecutor do
       "Executing workflow (#{mode}) with #{total_nodes} nodes, #{length(root_nodes)} root nodes: #{inspect(root_nodes)}"
     )
 
-    # Initialize execution state with message_inputs, image_inputs, user_profile, and preview in context
+    # Initialize execution state with message_inputs, image_inputs, runtime_text_inputs, user_profile, and preview in context
     state = %__MODULE__{
       node_map: node_map,
       input_links: input_links,
@@ -149,6 +154,7 @@ defmodule Play.WorkflowExecutor do
         caller_pid: caller_pid,
         message_inputs: message_inputs,
         image_inputs: image_inputs,
+        runtime_text_inputs: runtime_text_inputs,
         user_profile: user_profile,
         preview: preview
       },

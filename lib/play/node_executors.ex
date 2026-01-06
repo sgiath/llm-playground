@@ -189,22 +189,31 @@ defmodule Play.NodeExecutors do
     {:ok, %{0 => part}}
   end
 
-  # Prompt template node - string interpolation with {{variable}} syntax
+  # Prompt template node - string interpolation with {{var1}}, {{var2}}, etc. syntax
+  # Slot 0: template text (or fall back to property)
+  # Slots 1+: variable values (var1, var2, etc.)
   def execute("utility/prompt_template", _node, inputs, properties, _context) do
-    template = Map.get(properties, "template", "")
-    var1_name = Map.get(properties, "var1_name", "var1")
-    var2_name = Map.get(properties, "var2_name", "var2")
-    var3_name = Map.get(properties, "var3_name", "var3")
+    # Get template from input slot 0, or fall back to property
+    template = Map.get(inputs, 0) || Map.get(properties, "template", "")
+    template = if is_binary(template), do: template, else: to_string(template)
 
-    var1 = Map.get(inputs, 0, "")
-    var2 = Map.get(inputs, 1, "")
-    var3 = Map.get(inputs, 2, "")
+    # Collect all variable values from dynamic inputs (slots 1+)
+    # Sort by slot number to ensure proper ordering
+    var_values =
+      inputs
+      |> Enum.filter(fn {slot, _} -> slot > 0 end)
+      |> Enum.sort_by(fn {slot, _} -> slot end)
+      |> Enum.map(fn {_slot, value} -> value end)
 
+    # Replace {{var1}}, {{var2}}, etc. with corresponding values
     result =
-      template
-      |> String.replace("{{#{var1_name}}}", to_string(var1 || ""))
-      |> String.replace("{{#{var2_name}}}", to_string(var2 || ""))
-      |> String.replace("{{#{var3_name}}}", to_string(var3 || ""))
+      var_values
+      |> Enum.with_index(1)
+      |> Enum.reduce(template, fn {value, index}, acc ->
+        var_name = "var#{index}"
+        value_str = if is_nil(value), do: "", else: to_string(value)
+        String.replace(acc, "{{#{var_name}}}", value_str)
+      end)
 
     {:ok, %{0 => result}}
   end
@@ -365,22 +374,10 @@ defmodule Play.NodeExecutors do
             last_message = updated_chain.last_message
             response_text = extract_message_content(last_message)
 
-            # Get all messages for output
-            messages_out = updated_chain.messages
-
-            # Get tool calls if any
-            tool_calls =
-              if last_message && last_message.tool_calls do
-                last_message.tool_calls
-              else
-                []
-              end
-
             {:ok,
              %{
                0 => response_text,
-               1 => messages_out,
-               2 => tool_calls
+               1 => updated_chain.messages
              }}
 
           {:error, _chain, %LangChain.LangChainError{message: message}} ->
@@ -437,6 +434,25 @@ defmodule Play.NodeExecutors do
 
       part = ContentPart.text!(actual_content)
       {:ok, %{0 => part}}
+    end
+  end
+
+  # Runtime text input node - returns plain text from runtime input (not a ContentPart)
+  # The text content is injected via context[:runtime_text_inputs][node_id] at execution time
+  # In preview mode, returns nil (treated as not connected)
+  def execute("input/runtime_text_input", node, _inputs, _properties, context) do
+    preview_mode = Map.get(context, :preview, false)
+
+    # In preview mode, return nil so this node is treated as not connected
+    if preview_mode do
+      {:ok, %{0 => nil}}
+    else
+      node_id = node["id"]
+      runtime_text_inputs = Map.get(context, :runtime_text_inputs, %{})
+      content = Map.get(runtime_text_inputs, node_id, "")
+
+      # Return plain text (or empty string if not provided)
+      {:ok, %{0 => content || ""}}
     end
   end
 

@@ -77,6 +77,9 @@ const LitegraphHook = {
     this.graphCanvas.render_canvas_border = false;
     this.graphCanvas.node_title_color = "#ffffff";
 
+    // Override the prompt function to use LiveView modal
+    this.setupPromptOverride();
+
     // Setup graph change callbacks
     this.setupGraphCallbacks();
 
@@ -88,6 +91,132 @@ const LitegraphHook = {
 
     // Push initial graph state
     this.pushGraphState("graph_initialized");
+  },
+
+  // Override LiteGraph's prompt function to use LiveView modal instead
+  setupPromptOverride() {
+    const hook = this;
+    
+    // Store reference to the original prompt method
+    const originalPrompt = LGraphCanvas.prototype.prompt;
+    
+    // Storage for pending prompt callback
+    this.pendingPromptCallback = null;
+    this.pendingPromptWidget = null;
+    
+    // Override the prompt method
+    LGraphCanvas.prototype.prompt = function(title, value, callback, event, multiline) {
+      // Find the node and widget that triggered this prompt
+      let nodeId = null;
+      let widgetName = title;
+      
+      // Try multiple sources to find the node - node_widget is set too late, try node_over
+      if (this.node_widget && this.node_widget[0]) {
+        nodeId = this.node_widget[0].id;
+        if (this.node_widget[1]) {
+          widgetName = this.node_widget[1].name || title;
+        }
+      } else if (this.node_over) {
+        // node_over is the node currently under the mouse
+        nodeId = this.node_over.id;
+        // Try to find the widget by matching the value
+        if (this.node_over.widgets) {
+          const widget = this.node_over.widgets.find(w => w.value === value || w.name === title);
+          if (widget) {
+            widgetName = widget.name || title;
+          }
+        }
+      }
+      
+      // If we have a valid node, use LiveView modal
+      if (nodeId !== null) {
+        // Store the callback and widget for later
+        hook.pendingPromptCallback = callback;
+        hook.pendingPromptWidget = this.node_widget ? this.node_widget[1] : null;
+        
+        // Get the node for additional context
+        const node = hook.graph.getNodeById(nodeId);
+        const nodeType = node ? node.type : null;
+        
+        // Gather input connection info for prompt_template nodes
+        let inputConnections = null;
+        if (node && nodeType === "utility/prompt_template") {
+          inputConnections = [];
+          if (node.inputs) {
+            node.inputs.forEach((input, idx) => {
+              const connInfo = {
+                slot: idx,
+                name: input.name,
+                connected: input.link !== null,
+                source_node: null,
+                source_title: null
+              };
+              
+              // If connected, find the source node
+              if (input.link !== null) {
+                const link = hook.graph.links[input.link];
+                if (link) {
+                  const sourceNode = hook.graph.getNodeById(link.origin_id);
+                  if (sourceNode) {
+                    connInfo.source_node = sourceNode.id;
+                    connInfo.source_title = sourceNode.title || sourceNode.type.split('/').pop();
+                  }
+                }
+              }
+              
+              inputConnections.push(connInfo);
+            });
+          }
+        }
+        
+        // Push event to LiveView to show modal
+        hook.pushEvent("show_text_widget_modal", {
+          node_id: nodeId,
+          widget_name: widgetName,
+          value: value || "",
+          multiline: multiline || false,
+          title: title,
+          node_type: nodeType,
+          input_connections: inputConnections
+        });
+      } else {
+        // Fallback to original prompt if we can't determine the node
+        originalPrompt.call(this, title, value, callback, event, multiline);
+      }
+    };
+    
+    // Handle the saved value from LiveView modal
+    this.handleEvent("text_widget_value_saved", (payload) => {
+      const { node_id, widget_name, value } = payload;
+      
+      // Call the stored callback with the new value
+      if (hook.pendingPromptCallback) {
+        hook.pendingPromptCallback(value);
+        hook.pendingPromptCallback = null;
+        hook.pendingPromptWidget = null;
+      }
+      
+      // Also update the node property directly to ensure sync
+      const node = hook.graph.getNodeById(node_id);
+      if (node && node.widgets) {
+        const widget = node.widgets.find(w => w.name === widget_name);
+        if (widget) {
+          widget.value = value;
+          if (widget.property) {
+            node.properties[widget.property] = value;
+          }
+        }
+      }
+      
+      // Redraw the canvas
+      hook.graphCanvas.setDirty(true, true);
+    });
+    
+    // Handle modal cancel - just clear the pending callback
+    this.handleEvent("text_widget_modal_cancelled", () => {
+      hook.pendingPromptCallback = null;
+      hook.pendingPromptWidget = null;
+    });
   },
 
   // Handle events pushed from the server
@@ -828,26 +957,33 @@ const LitegraphHook = {
           options.push({
             content: `Add ${inputLabel} Input`,
             callback: () => {
-              const newIndex = currentCount + 1;
+              // Account for start_slot offset when naming dynamic inputs
+              const dynamicCount = currentCount - (config.start_slot || 0);
+              const newIndex = dynamicCount + 1;
               const newName = `${config.name_prefix}${newIndex}`;
               this.addInput(newName, config.type || null);
               this.properties.input_count = newIndex;
-              // Adjust node size
-              this.size[1] = Math.max(60, 30 + newIndex * 25);
+              // Adjust node size based on total inputs
+              const newTotalCount = currentCount + 1;
+              this.size[1] = Math.max(60, 30 + newTotalCount * 25);
               this.setDirtyCanvas(true, true);
             },
           });
         }
 
         // Add "Remove Input" option
-        if (currentCount > config.min) {
+        // Only allow removing if we have more than the minimum dynamic inputs
+        const dynamicInputCount = currentCount - (config.start_slot || 0);
+        if (dynamicInputCount > config.min) {
           options.push({
             content: `Remove ${inputLabel} Input`,
             callback: () => {
               this.removeInput(currentCount - 1);
-              this.properties.input_count = currentCount - 1;
-              // Adjust node size
-              this.size[1] = Math.max(60, 30 + (currentCount - 1) * 25);
+              const newDynamicCount = dynamicInputCount - 1;
+              this.properties.input_count = newDynamicCount;
+              // Adjust node size based on total inputs
+              const newTotalCount = currentCount - 1;
+              this.size[1] = Math.max(60, 30 + newTotalCount * 25);
               this.setDirtyCanvas(true, true);
             },
           });
@@ -877,12 +1013,15 @@ const LitegraphHook = {
         if (isConnected && slotIndex === currentCount - 1) {
           // Check if we can add more inputs
           if (currentCount < config.max) {
-            const newIndex = currentCount + 1;
+            // Account for start_slot offset when naming dynamic inputs
+            const dynamicCount = currentCount - (config.start_slot || 0);
+            const newIndex = dynamicCount + 1;
             const newName = `${config.name_prefix}${newIndex}`;
             this.addInput(newName, config.type || null);
             this.properties.input_count = newIndex;
-            // Adjust node size
-            this.size[1] = Math.max(60, 30 + newIndex * 25);
+            // Adjust node size based on total inputs
+            const newTotalCount = currentCount + 1;
+            this.size[1] = Math.max(60, 30 + newTotalCount * 25);
             this.setDirtyCanvas(true, true);
           }
         }
@@ -900,7 +1039,8 @@ const LitegraphHook = {
         // the inputs match what was saved (litegraph handles this automatically)
         // but we need to update the size based on input count
         const inputCount = this.inputs ? this.inputs.length : 1;
-        this.properties.input_count = inputCount;
+        // input_count tracks only dynamic inputs (accounting for start_slot offset)
+        this.properties.input_count = inputCount - (config.start_slot || 0);
         this.size[1] = Math.max(60, 30 + inputCount * 25);
       };
     } else {

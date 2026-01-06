@@ -26,6 +26,7 @@ defmodule PlayWeb.AgentLive do
         agent_data = if agent.data == %{}, do: nil, else: agent.data
         message_input_nodes = extract_message_input_nodes(agent_data)
         image_input_nodes = extract_image_input_nodes(agent_data)
+        runtime_text_input_nodes = extract_runtime_text_input_nodes(agent_data)
         conversation_display_nodes = extract_conversation_display_nodes(agent_data)
 
         socket =
@@ -44,12 +45,15 @@ defmodule PlayWeb.AgentLive do
           |> assign(:message_inputs, %{})
           |> assign(:image_input_nodes, image_input_nodes)
           |> assign(:image_inputs, %{})
+          |> assign(:runtime_text_input_nodes, runtime_text_input_nodes)
+          |> assign(:runtime_text_inputs, %{})
           |> assign(:conversation_display_nodes, conversation_display_nodes)
           |> assign(:conversation_data, %{})
           |> assign(:execution_outputs, %{})
           |> assign(:streaming_content, %{})
           |> assign(:preview_timer, nil)
           |> assign(:pending_upload_node_id, nil)
+          |> assign(:text_widget_modal, nil)
           |> allow_upload(:image,
             accept: ~w(.jpg .jpeg .png .webp .gif),
             max_entries: 10,
@@ -92,6 +96,26 @@ defmodule PlayWeb.AgentLive do
     |> Enum.sort_by(& &1.id)
   end
 
+  # Extracts runtime_text_input nodes from agent data for sidebar display
+  defp extract_runtime_text_input_nodes(nil), do: []
+
+  defp extract_runtime_text_input_nodes(agent_data) do
+    (agent_data["nodes"] || [])
+    |> Enum.filter(fn node -> node["type"] == "input/runtime_text_input" end)
+    |> Enum.map(fn node ->
+      # Default to true (multiline) if property is not set
+      multiline = get_in(node, ["properties", "multiline"])
+      multiline = if is_nil(multiline), do: true, else: multiline
+
+      %{
+        id: node["id"],
+        label: get_in(node, ["properties", "label"]) || "Text Input",
+        multiline: multiline
+      }
+    end)
+    |> Enum.sort_by(& &1.id)
+  end
+
   # Extracts conversation_display nodes from agent data for sidebar display
   defp extract_conversation_display_nodes(nil), do: []
 
@@ -114,7 +138,9 @@ defmodule PlayWeb.AgentLive do
       <div class="flex h-[calc(100vh-14rem)]">
         <%!-- Input Sidebar (Left) --%>
         <div
-          :if={@message_input_nodes != [] || @image_input_nodes != []}
+          :if={
+            @message_input_nodes != [] || @image_input_nodes != [] || @runtime_text_input_nodes != []
+          }
           class="w-72 bg-base-200 border-r border-base-300 flex flex-col"
         >
           <div class="p-4 border-b border-base-300">
@@ -141,6 +167,38 @@ defmodule PlayWeb.AgentLive do
                   placeholder="Type your message..."
                   class="textarea textarea-bordered w-full h-24 text-sm resize-none"
                 >{Map.get(@message_inputs, node.id, "")}</textarea>
+              </div>
+            </div>
+
+            <%!-- Runtime Text Input Section --%>
+            <div :if={@runtime_text_input_nodes != []} class="space-y-4">
+              <div :for={node <- @runtime_text_input_nodes} class="space-y-2">
+                <label
+                  class="text-sm font-medium text-base-content"
+                  for={"runtime-text-input-#{node.id}"}
+                >
+                  {node.label}
+                </label>
+                <textarea
+                  :if={node.multiline}
+                  id={"runtime-text-input-#{node.id}"}
+                  name={"runtime_text_input[#{node.id}]"}
+                  phx-keyup="runtime_text_input_changed"
+                  phx-value-node-id={node.id}
+                  placeholder="Enter text..."
+                  class="textarea textarea-bordered w-full h-24 text-sm resize-none"
+                >{Map.get(@runtime_text_inputs, node.id, "")}</textarea>
+                <input
+                  :if={!node.multiline}
+                  type="text"
+                  id={"runtime-text-input-#{node.id}"}
+                  name={"runtime_text_input[#{node.id}]"}
+                  phx-keyup="runtime_text_input_changed"
+                  phx-value-node-id={node.id}
+                  placeholder="Enter text..."
+                  value={Map.get(@runtime_text_inputs, node.id, "")}
+                  class="input input-bordered w-full text-sm"
+                />
               </div>
             </div>
 
@@ -364,6 +422,92 @@ defmodule PlayWeb.AgentLive do
             <% end %>
           </div>
         </div>
+      </div>
+
+      <%!-- Text Widget Edit Modal --%>
+      <div
+        :if={@text_widget_modal}
+        id="text-widget-modal"
+        class="modal modal-open"
+        phx-window-keydown="close_text_widget_modal"
+        phx-key="escape"
+      >
+        <div class="modal-box bg-base-200 border border-base-300 shadow-2xl max-w-2xl">
+          <h3 class="font-bold text-lg mb-4 text-base-content">
+            {@text_widget_modal.widget_name}
+          </h3>
+
+          <form phx-submit="save_text_widget_value" class="space-y-4" id="text-widget-form">
+            <input type="hidden" name="node_id" value={@text_widget_modal.node_id} />
+            <input type="hidden" name="widget_name" value={@text_widget_modal.widget_name} />
+
+            <textarea
+              :if={@text_widget_modal.multiline}
+              id="text-widget-input"
+              name="value"
+              class="textarea textarea-bordered w-full h-64 font-mono text-sm bg-base-100 focus:border-primary"
+              placeholder="Enter text..."
+              autofocus
+            >{@text_widget_modal.value}</textarea>
+
+            <input
+              :if={!@text_widget_modal.multiline}
+              type="text"
+              id="text-widget-input"
+              name="value"
+              value={@text_widget_modal.value}
+              class="input input-bordered w-full bg-base-100 focus:border-primary"
+              placeholder="Enter text..."
+              autofocus
+            />
+
+            <%!-- Variable reference panel for Prompt Template nodes --%>
+            <div
+              :if={@text_widget_modal.variable_inputs && @text_widget_modal.variable_inputs != []}
+              class="bg-base-300 rounded-lg p-3"
+            >
+              <div class="flex items-center gap-2 mb-2">
+                <.icon name="hero-variable" class="w-4 h-4 text-info" />
+                <span class="text-sm font-medium text-base-content/80">Available Variables</span>
+              </div>
+              <div class="space-y-1.5">
+                <div
+                  :for={var <- @text_widget_modal.variable_inputs}
+                  class="flex items-center gap-2 text-sm"
+                >
+                  <code class="bg-base-100 px-2 py-0.5 rounded text-info font-mono text-xs">
+                    {"{{#{var.name}}}"}
+                  </code>
+                  <span class="text-base-content/50">→</span>
+                  <span :if={var.connected} class="text-success flex items-center gap-1">
+                    <.icon name="hero-link" class="w-3 h-3" />
+                    <span class="font-medium">{var.source_title}</span>
+                  </span>
+                  <span :if={!var.connected} class="text-base-content/40 italic">
+                    not connected
+                  </span>
+                </div>
+              </div>
+              <p class="text-xs text-base-content/50 mt-2">
+                Use these placeholders in your template. They will be replaced with values from connected nodes.
+              </p>
+            </div>
+
+            <div class="modal-action">
+              <button
+                type="button"
+                class="btn btn-ghost"
+                phx-click="close_text_widget_modal"
+              >
+                Cancel
+              </button>
+              <button type="submit" class="btn btn-primary">
+                <.icon name="hero-check" class="w-4 h-4" /> Save
+              </button>
+            </div>
+          </form>
+        </div>
+        <div class="modal-backdrop" phx-click="close_text_widget_modal"></div>
       </div>
     </Layouts.app>
     """
@@ -950,6 +1094,7 @@ defmodule PlayWeb.AgentLive do
     link_count = length(agent_data["links"] || [])
     message_input_nodes = extract_message_input_nodes(agent_data)
     image_input_nodes = extract_image_input_nodes(agent_data)
+    runtime_text_input_nodes = extract_runtime_text_input_nodes(agent_data)
     conversation_display_nodes = extract_conversation_display_nodes(agent_data)
 
     # Skip the initial empty agent state if we have a saved agent to load
@@ -977,6 +1122,16 @@ defmodule PlayWeb.AgentLive do
         |> Enum.filter(fn {node_id, _} -> MapSet.member?(valid_image_node_ids, node_id) end)
         |> Map.new()
 
+      # Clean up runtime_text_inputs for removed runtime text input nodes
+      valid_runtime_text_node_ids = MapSet.new(runtime_text_input_nodes, & &1.id)
+
+      cleaned_runtime_text_inputs =
+        socket.assigns.runtime_text_inputs
+        |> Enum.filter(fn {node_id, _} ->
+          MapSet.member?(valid_runtime_text_node_ids, node_id)
+        end)
+        |> Map.new()
+
       socket =
         case Agents.update_agent(agent, %{data: agent_data}) do
           {:ok, updated_agent} ->
@@ -988,6 +1143,8 @@ defmodule PlayWeb.AgentLive do
             |> assign(:message_input_nodes, message_input_nodes)
             |> assign(:image_input_nodes, image_input_nodes)
             |> assign(:image_inputs, cleaned_image_inputs)
+            |> assign(:runtime_text_input_nodes, runtime_text_input_nodes)
+            |> assign(:runtime_text_inputs, cleaned_runtime_text_inputs)
             |> assign(:conversation_display_nodes, conversation_display_nodes)
             |> assign(:conversation_data, cleaned_conversation_data)
 
@@ -1001,6 +1158,8 @@ defmodule PlayWeb.AgentLive do
             |> assign(:message_input_nodes, message_input_nodes)
             |> assign(:image_input_nodes, image_input_nodes)
             |> assign(:image_inputs, cleaned_image_inputs)
+            |> assign(:runtime_text_input_nodes, runtime_text_input_nodes)
+            |> assign(:runtime_text_inputs, cleaned_runtime_text_inputs)
             |> assign(:conversation_display_nodes, conversation_display_nodes)
             |> assign(:conversation_data, cleaned_conversation_data)
         end
@@ -1117,6 +1276,79 @@ defmodule PlayWeb.AgentLive do
     {:noreply, socket}
   end
 
+  # Handle show text widget modal - triggered by JS when text widget is clicked
+  @impl true
+  def handle_event("show_text_widget_modal", params, socket) do
+    Logger.debug(
+      "Opening text widget modal for node #{params["node_id"]}: #{params["widget_name"]}"
+    )
+
+    # Extract variable inputs for prompt_template nodes (skip slot 0 which is template input)
+    variable_inputs =
+      case params["input_connections"] do
+        connections when is_list(connections) ->
+          connections
+          |> Enum.filter(fn conn -> conn["slot"] > 0 end)
+          |> Enum.map(fn conn ->
+            %{
+              name: conn["name"],
+              slot: conn["slot"],
+              connected: conn["connected"],
+              source_title: conn["source_title"]
+            }
+          end)
+
+        _ ->
+          nil
+      end
+
+    modal_state = %{
+      node_id: params["node_id"],
+      widget_name: params["widget_name"],
+      value: params["value"] || "",
+      multiline: params["multiline"] || false,
+      title: params["title"] || "Edit Value",
+      node_type: params["node_type"],
+      variable_inputs: variable_inputs
+    }
+
+    {:noreply, assign(socket, :text_widget_modal, modal_state)}
+  end
+
+  # Handle save text widget value from modal
+  @impl true
+  def handle_event("save_text_widget_value", params, socket) do
+    node_id = params["node_id"]
+    widget_name = params["widget_name"]
+    value = params["value"] || ""
+
+    Logger.debug(
+      "Saving text widget value for node #{node_id}: #{widget_name} = #{inspect(value)}"
+    )
+
+    socket =
+      socket
+      |> assign(:text_widget_modal, nil)
+      |> push_event("text_widget_value_saved", %{
+        node_id: node_id,
+        widget_name: widget_name,
+        value: value
+      })
+
+    {:noreply, socket}
+  end
+
+  # Handle close/cancel text widget modal
+  @impl true
+  def handle_event("close_text_widget_modal", _params, socket) do
+    socket =
+      socket
+      |> assign(:text_widget_modal, nil)
+      |> push_event("text_widget_modal_cancelled", %{})
+
+    {:noreply, socket}
+  end
+
   # Handle agent loaded
   @impl true
   def handle_event("graph_loaded", params, socket) do
@@ -1158,6 +1390,23 @@ defmodule PlayWeb.AgentLive do
   end
 
   def handle_event("message_input_changed", _params, socket) do
+    # Fallback if node-id is missing
+    {:noreply, socket}
+  end
+
+  # Handle runtime text input changes
+  @impl true
+  def handle_event(
+        "runtime_text_input_changed",
+        %{"value" => value, "node-id" => node_id_str},
+        socket
+      ) do
+    node_id = String.to_integer(node_id_str)
+    runtime_text_inputs = Map.put(socket.assigns.runtime_text_inputs, node_id, value)
+    {:noreply, assign(socket, :runtime_text_inputs, runtime_text_inputs)}
+  end
+
+  def handle_event("runtime_text_input_changed", _params, socket) do
     # Fallback if node-id is missing
     {:noreply, socket}
   end
@@ -1206,14 +1455,16 @@ defmodule PlayWeb.AgentLive do
   def handle_event("execute_workflow", %{"graph" => agent_data}, socket) do
     Logger.info("Starting workflow execution with #{length(agent_data["nodes"] || [])} nodes")
 
-    # Start async execution with message inputs, image inputs, and user profile
+    # Start async execution with message inputs, image inputs, runtime text inputs, and user profile
     message_inputs = socket.assigns.message_inputs
     image_inputs = socket.assigns.image_inputs
+    runtime_text_inputs = socket.assigns.runtime_text_inputs
     user_profile = socket.assigns.current_scope.profile
 
     WorkflowExecutor.execute_async(agent_data, self(),
       message_inputs: message_inputs,
       image_inputs: image_inputs,
+      runtime_text_inputs: runtime_text_inputs,
       user_profile: user_profile
     )
 
@@ -1424,7 +1675,7 @@ defmodule PlayWeb.AgentLive do
                 messages =
                   props["_messages"] ||
                     props["conversation_history"] ||
-                    props["messages_out"] ||
+                    props["messages"] ||
                     []
 
                 if is_list(messages) do
@@ -1675,6 +1926,7 @@ defmodule PlayWeb.AgentLive do
         |> assign(:execution_status, :complete)
         |> assign(:message_inputs, %{})
         |> assign(:image_inputs, %{})
+        |> assign(:runtime_text_inputs, %{})
         |> push_event("execution_complete", %{})
         |> push_event("clear_message_inputs", %{})
       end

@@ -36,7 +36,7 @@ defmodule Play.PageMetadata do
         "text" => "Example Domain\\nThis domain is for use..."
       }}
   """
-  @max_refresh_retries 20
+  @max_refresh_retries 200
 
   def fetch(url, opts \\ []) do
     do_fetch(url, opts, 0)
@@ -84,7 +84,7 @@ defmodule Play.PageMetadata do
          _retries
        ) do
     Logger.warning("Page metadata refresh timeout after #{@max_refresh_retries} retries")
-    {:error, "Refresh timeout - page metadata not ready after 2 seconds"}
+    {:error, "Refresh timeout - page metadata not ready after 20 seconds"}
   end
 
   defp handle_response({:ok, %Req.Response{status: 200, body: body}}, url, _opts, _retries) do
