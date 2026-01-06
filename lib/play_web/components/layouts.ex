@@ -49,9 +49,6 @@ defmodule PlayWeb.Layouts do
           <li>
             <a href="/conv" class="btn btn-ghost">Conversations</a>
           </li>
-          <li>
-            <.theme_toggle />
-          </li>
           <%= if @current_scope && @current_scope.user do %>
             <li>
               <.profile_menu current_scope={@current_scope} />

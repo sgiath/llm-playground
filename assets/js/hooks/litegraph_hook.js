@@ -385,6 +385,56 @@ const LitegraphHook = {
       }
     });
 
+    // Tool node is starting execution - highlight it (unless in preview mode)
+    this.handleEvent("tool_executing", (payload) => {
+      // Skip highlighting in preview mode
+      if (this._previewMode) return;
+
+      const { node_id } = payload;
+      const node = this.graph.getNodeById(node_id);
+      if (node) {
+        // Store original colors if not already stored
+        if (!this.originalColors.has(node_id)) {
+          this.originalColors.set(node_id, {
+            color: node.color,
+            bgcolor: node.bgcolor,
+          });
+        }
+
+        // Mark as executing
+        this.executingNodes.add(node_id);
+
+        // Set executing visual style (pulsing yellow/orange)
+        node.color = "#f59e0b";
+        node.bgcolor = "#78350f";
+
+        // Add custom drawing for execution indicator
+        this.setupNodeExecutionDrawing(node);
+
+        this.graphCanvas.setDirty(true, true);
+      }
+    });
+
+    // Tool node has completed execution
+    this.handleEvent("tool_completed", (payload) => {
+      const { node_id } = payload;
+      const node = this.graph.getNodeById(node_id);
+      if (node) {
+        // Skip visual highlighting in preview mode
+        if (!this._previewMode) {
+          // Remove from executing, add to completed
+          this.executingNodes.delete(node_id);
+          this.completedNodes.add(node_id);
+
+          // Set completed visual style (green)
+          node.color = "#22c55e";
+          node.bgcolor = "#14532d";
+        }
+
+        this.graphCanvas.setDirty(true, true);
+      }
+    });
+
     // Node error occurred
     this.handleEvent("node_error", (payload) => {
       const { node_id, reason } = payload;

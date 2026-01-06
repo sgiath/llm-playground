@@ -764,7 +764,7 @@ defmodule PlayWeb.AgentLive do
   end
 
   defp try_parse_json(content) when is_binary(content) do
-    case Jason.decode(content) do
+    case JSON.decode(content) do
       {:ok, data} -> {:ok, data}
       {:error, _} -> :error
     end
@@ -775,7 +775,7 @@ defmodule PlayWeb.AgentLive do
   # Convert tool arguments to JSON string for json_tree component
   defp tool_args_to_json(nil), do: "{}"
   defp tool_args_to_json(args) when is_binary(args), do: args
-  defp tool_args_to_json(args) when is_map(args), do: Jason.encode!(args)
+  defp tool_args_to_json(args) when is_map(args), do: JSON.encode!(args)
   defp tool_args_to_json(args), do: inspect(args)
 
   # ============================================================================
@@ -1181,42 +1181,6 @@ defmodule PlayWeb.AgentLive do
     {:noreply, assign(socket, :image_inputs, image_inputs)}
   end
 
-  # Handle image upload progress - auto-uploads when complete
-  defp handle_image_progress(:image, entry, socket) do
-    if entry.done? do
-      # Get the target node_id from the pending upload tracking
-      node_id = socket.assigns[:pending_upload_node_id]
-
-      if node_id do
-        # Consume the completed entry
-        uploaded =
-          consume_uploaded_entry(socket, entry, fn %{path: path} ->
-            {:ok, binary} = File.read(path)
-            base64_data = Base.encode64(binary)
-
-            {:ok,
-             %{
-               data: base64_data,
-               media_type: entry.client_type,
-               filename: entry.client_name
-             }}
-          end)
-
-        # Store the uploaded image and clear the pending tracking
-        image_inputs = Map.put(socket.assigns.image_inputs, node_id, uploaded)
-
-        socket
-        |> assign(:image_inputs, image_inputs)
-        |> assign(:pending_upload_node_id, nil)
-        |> then(&{:noreply, &1})
-      else
-        {:noreply, socket}
-      end
-    else
-      {:noreply, socket}
-    end
-  end
-
   # Handle send messages button click
   @impl true
   def handle_event("send_messages", _params, socket) do
@@ -1362,6 +1326,42 @@ defmodule PlayWeb.AgentLive do
           socket = put_flash(socket, :error, "Failed to save conversation")
           {:noreply, socket}
       end
+    end
+  end
+
+  # Handle image upload progress - auto-uploads when complete
+  defp handle_image_progress(:image, entry, socket) do
+    if entry.done? do
+      # Get the target node_id from the pending upload tracking
+      node_id = socket.assigns[:pending_upload_node_id]
+
+      if node_id do
+        # Consume the completed entry
+        uploaded =
+          consume_uploaded_entry(socket, entry, fn %{path: path} ->
+            {:ok, binary} = File.read(path)
+            base64_data = Base.encode64(binary)
+
+            {:ok,
+             %{
+               data: base64_data,
+               media_type: entry.client_type,
+               filename: entry.client_name
+             }}
+          end)
+
+        # Store the uploaded image and clear the pending tracking
+        image_inputs = Map.put(socket.assigns.image_inputs, node_id, uploaded)
+
+        socket
+        |> assign(:image_inputs, image_inputs)
+        |> assign(:pending_upload_node_id, nil)
+        |> then(&{:noreply, &1})
+      else
+        {:noreply, socket}
+      end
+    else
+      {:noreply, socket}
     end
   end
 
@@ -1554,6 +1554,20 @@ defmodule PlayWeb.AgentLive do
   def handle_info({:node_executing, node_id}, socket) do
     Logger.debug("Node #{node_id} is executing")
     socket = push_event(socket, "node_executing", %{node_id: node_id})
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:tool_executing, node_id}, socket) do
+    Logger.debug("Tool node #{node_id} is executing")
+    socket = push_event(socket, "tool_executing", %{node_id: node_id})
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:tool_completed, node_id}, socket) do
+    Logger.debug("Tool node #{node_id} completed")
+    socket = push_event(socket, "tool_completed", %{node_id: node_id})
     {:noreply, socket}
   end
 

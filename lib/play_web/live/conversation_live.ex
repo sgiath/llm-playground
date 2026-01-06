@@ -340,7 +340,7 @@ defmodule PlayWeb.ConversationLive do
   end
 
   defp try_parse_json(content) when is_binary(content) do
-    case Jason.decode(content) do
+    case JSON.decode(content) do
       {:ok, data} -> {:ok, data}
       {:error, _} -> :error
     end
@@ -662,7 +662,7 @@ defmodule PlayWeb.ConversationLive do
   # Convert tool arguments to JSON string for json_tree component
   defp tool_args_to_json(nil), do: "{}"
   defp tool_args_to_json(args) when is_binary(args), do: args
-  defp tool_args_to_json(args) when is_map(args), do: Jason.encode!(args)
+  defp tool_args_to_json(args) when is_map(args), do: JSON.encode!(args)
   defp tool_args_to_json(args), do: inspect(args)
 
   # Find the tool response that matches a tool call by call_id or name

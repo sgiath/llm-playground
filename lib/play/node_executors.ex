@@ -10,7 +10,6 @@ defmodule Play.NodeExecutors do
 
   alias LangChain.ChatModels.ChatOpenAI
   alias LangChain.ChatModels.ChatAnthropic
-  alias LangChain.ChatModels.ChatGoogleAI
   alias LangChain.ChatModels.ChatGrok
   alias LangChain.Chains.LLMChain
   alias LangChain.Message
@@ -31,7 +30,6 @@ defmodule Play.NodeExecutors do
   ### LLM Config Nodes
   - `llm/openai` - Creates a ChatOpenAI struct
   - `llm/anthropic` - Creates a ChatAnthropic struct
-  - `llm/google_ai` - Creates a ChatGoogleAI struct
   - `llm/xai` - Creates a ChatGrok struct
 
   ### Message Nodes
@@ -88,21 +86,6 @@ defmodule Play.NodeExecutors do
 
     llm =
       ChatAnthropic.new!(%{
-        model: model,
-        reasoning_effort: reasoning_effort,
-        stream: true
-      })
-
-    {:ok, %{0 => llm}}
-  end
-
-  # Google AI LLM configuration node
-  def execute("llm/google_ai", _node, _inputs, properties, _context) do
-    model = Map.get(properties, "model", "gemini-2.5-pro")
-    reasoning_effort = Map.get(properties, "reasoning_effort", "medium")
-
-    llm =
-      ChatGoogleAI.new!(%{
         model: model,
         reasoning_effort: reasoning_effort,
         stream: true
@@ -231,8 +214,10 @@ defmodule Play.NodeExecutors do
   # ============================================================================
 
   # Web search tool node - creates a LangChain Function for web search using SearxNG
-  def execute("tool/web_search_tool", _node, _inputs, properties, _context) do
+  def execute("tool/web_search_tool", node, _inputs, properties, context) do
     max_results = Map.get(properties, "max_results", 5)
+    caller_pid = Map.get(context, :caller_pid)
+    node_id = node["id"]
 
     function =
       Function.new!(%{
@@ -243,7 +228,15 @@ defmodule Play.NodeExecutors do
           FunctionParam.new!(%{name: "query", type: :string, required: true})
         ],
         function: fn %{"query" => query}, _context ->
-          execute_searxng_search(query, max_results)
+          # Notify that tool is executing
+          if caller_pid, do: send(caller_pid, {:tool_executing, node_id})
+
+          result = execute_searxng_search(query, max_results)
+
+          # Notify that tool has completed
+          if caller_pid, do: send(caller_pid, {:tool_completed, node_id})
+
+          result
         end
       })
 
@@ -251,8 +244,10 @@ defmodule Play.NodeExecutors do
   end
 
   # URL fetch tool node - creates a LangChain Function for fetching page content and metadata
-  def execute("tool/url_fetch_tool", _node, _inputs, properties, _context) do
+  def execute("tool/url_fetch_tool", node, _inputs, properties, context) do
     device = Map.get(properties, "device", "desktop")
+    caller_pid = Map.get(context, :caller_pid)
+    node_id = node["id"]
 
     function =
       Function.new!(%{
@@ -263,7 +258,15 @@ defmodule Play.NodeExecutors do
           FunctionParam.new!(%{name: "url", type: :string, required: true})
         ],
         function: fn %{"url" => url}, _context ->
-          execute_url_fetch(url, device)
+          # Notify that tool is executing
+          if caller_pid, do: send(caller_pid, {:tool_executing, node_id})
+
+          result = execute_url_fetch(url, device)
+
+          # Notify that tool has completed
+          if caller_pid, do: send(caller_pid, {:tool_completed, node_id})
+
+          result
         end
       })
 
@@ -507,7 +510,7 @@ defmodule Play.NodeExecutors do
   def execute("utility/json_parse", _node, inputs, _properties, _context) do
     text = Map.get(inputs, 0, "{}")
 
-    case Jason.decode(text) do
+    case JSON.decode(text) do
       {:ok, parsed} -> {:ok, %{0 => parsed}}
       {:error, _} -> {:ok, %{0 => %{"error" => "Invalid JSON"}}}
     end
@@ -732,7 +735,7 @@ defmodule Play.NodeExecutors do
         results =
           body
           |> Map.update("results", [], &Enum.take(&1, max_results))
-          |> Jason.encode!()
+          |> JSON.encode!()
 
         {:ok, results}
 
@@ -749,7 +752,7 @@ defmodule Play.NodeExecutors do
 
     case Play.PageMetadata.fetch(url, device: device) do
       {:ok, metadata} ->
-        {:ok, Jason.encode!(metadata)}
+        {:ok, JSON.encode!(metadata)}
 
       {:error, reason} ->
         {:error, "URL fetch failed: #{reason}"}

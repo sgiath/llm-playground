@@ -60,6 +60,8 @@ defmodule PlayWeb do
     quote do
       use Phoenix.LiveComponent
 
+      on_mount {SgiathAuth, :mount_current_scope}
+
       unquote(html_helpers())
     end
   end

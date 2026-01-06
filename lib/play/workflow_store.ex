@@ -15,7 +15,7 @@ defmodule Play.WorkflowStore do
   def save(graph_state) when is_map(graph_state) do
     ensure_dir!()
 
-    json = Jason.encode!(graph_state, pretty: true)
+    json = JSON.encode!(graph_state, pretty: true)
     File.write!(current_path(), json)
 
     :ok
@@ -33,7 +33,7 @@ defmodule Play.WorkflowStore do
     if File.exists?(path) do
       case File.read(path) do
         {:ok, content} ->
-          case Jason.decode(content) do
+          case JSON.decode(content) do
             {:ok, graph_state} ->
               Logger.info("WorkflowStore loaded #{length(graph_state["nodes"] || [])} nodes")
               {:ok, graph_state}

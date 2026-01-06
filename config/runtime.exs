@@ -19,11 +19,10 @@ config :sgiath_auth,
   workos_client_id: workos_client_id,
   workos_secret_key: workos_secret_key
 
-# OpenRouter API configuration (used via LangChain's ChatOpenAI with custom endpoint)
 openai_api_key =
   System.get_env("OPENAI_API_KEY") ||
     raise """
-    environment variable OPENROUTER_API_KEY is missing.
+    environment variable OPENAI_API_KEY is missing.
     Get it from your OpenAI dashboard at https://openai.com
     """
 
@@ -32,13 +31,6 @@ anthropic_api_key =
     raise """
     environment variable ANTHROPIC_API_KEY is missing.
     Get it from your Anthropic dashboard at https://anthropic.com
-    """
-
-google_ai_api_key =
-  System.get_env("GEMINI_API_KEY") ||
-    raise """
-    environment variable GEMINI_API_KEY is missing.
-    Get it from your Google Gemini dashboard at https://ai.google.com
     """
 
 xai_api_key =
@@ -51,8 +43,7 @@ xai_api_key =
 config :langchain,
   openai_key: openai_api_key,
   anthropic_key: anthropic_api_key,
-  google_ai_key: google_ai_api_key,
-  grok_key: xai_api_key
+  xai_api_key: xai_api_key
 
 page_metadata_api_key =
   System.get_env("PAGE_METADATA_API_KEY") ||

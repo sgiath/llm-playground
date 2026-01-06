@@ -23,7 +23,6 @@ defmodule Play.Web.Live.Nodes do
       # LLM Provider nodes
       openai_node(),
       anthropic_node(),
-      google_ai_node(),
       xai_node(),
 
       # Agent nodes
@@ -151,54 +150,6 @@ defmodule Play.Web.Live.Nodes do
       execute_code: """
       return {
         provider: 'anthropic',
-        model: properties.model,
-        reasoning_effort: properties.reasoning_effort
-      };
-      """
-    }
-  end
-
-  defp google_ai_node do
-    %{
-      type: "google_ai",
-      title: "Google AI",
-      description: "Google Gemini LLM configuration",
-      category: "llm",
-      inputs: [],
-      outputs: [%{name: "llm_config", type: "llm_config"}],
-      properties: [
-        %{name: "model", default: "gemini-3-pro-preview"},
-        %{name: "reasoning_effort", default: "medium"}
-      ],
-      widgets: [
-        %{
-          type: "combo",
-          name: "Model",
-          property: "model",
-          default: "gemini-3-pro-preview",
-          options: %{
-            values: [
-              "gemini-3-pro-preview",
-              "gemini-3-flash-preview"
-            ]
-          }
-        },
-        %{
-          type: "combo",
-          name: "Reasoning",
-          property: "reasoning_effort",
-          default: "medium",
-          options: %{
-            values: ["none", "minimal", "low", "medium", "high", "xhigh"]
-          }
-        }
-      ],
-      size: [200, 170],
-      color: "#4285f4",
-      bgcolor: "#1a1a2e",
-      execute_code: """
-      return {
-        provider: 'google_ai',
         model: properties.model,
         reasoning_effort: properties.reasoning_effort
       };
