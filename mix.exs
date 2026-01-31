@@ -37,8 +37,7 @@ defmodule Play.MixProject do
 
       # Using fork with SSE comment fix for OpenRouter compatibility
       # See: https://github.com/brainlid/langchain/issues/259
-      # See: https://github.com/joecorcoran/langchain/commit/2c765721dad65ac7b546c258dc3d75cba6f4fd3e
-      {:langchain, github: "joecorcoran/langchain"},
+      {:langchain, github: "sgiath/langchain"},
 
       # phoenix
       {:bandit, "~> 1.10"},
