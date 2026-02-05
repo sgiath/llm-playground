@@ -23,8 +23,10 @@
               pkgs.watchman
 
               # deploy
-              pkgs.flyctl
+              pkgs.railway
+              pkgs.postgresql
             ];
+
             env = {
               MIX_OS_DEPS_COMPILE_PARTITION_COUNT = "16";
               ERL_AFLAGS = "+pc unicode -kernel shell_history enabled";

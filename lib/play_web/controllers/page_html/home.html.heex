@@ -1,385 +1,289 @@
 <Layouts.flash_group flash={@flash} />
 
-<%!-- Hero Section with animated node background --%>
-<div class="hero min-h-screen bg-gradient-to-br from-base-300 via-base-200 to-base-300 relative overflow-hidden">
-  <%!-- Animated grid background --%>
-  <div class="absolute inset-0 opacity-20">
-    <svg class="h-full w-full" xmlns="http://www.w3.org/2000/svg">
+<div class="min-h-screen bg-base-300 text-base-content relative overflow-hidden flex flex-col">
+  <%!-- Background atmosphere --%>
+  <div class="pointer-events-none absolute inset-0">
+    <%!-- Dot grid --%>
+    <svg class="absolute inset-0 w-full h-full opacity-[0.035]" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
-          <path
-            d="M 60 0 L 0 0 0 60"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="0.5"
-            class="text-primary"
-          />
+        <pattern id="dots" width="32" height="32" patternUnits="userSpaceOnUse">
+          <circle cx="1" cy="1" r="0.75" fill="currentColor" />
         </pattern>
       </defs>
-      <rect width="100%" height="100%" fill="url(#grid)" />
+      <rect width="100%" height="100%" fill="url(#dots)" />
     </svg>
+
+    <%!-- Gradient glows for depth --%>
+    <div class="absolute top-[10%] left-[5%] w-[600px] h-[600px] rounded-full bg-primary/[0.04] blur-[120px]">
+    </div>
+    <div class="absolute bottom-[5%] right-[10%] w-[500px] h-[500px] rounded-full bg-info/[0.03] blur-[120px]">
+    </div>
+
+    <%!-- Top accent line --%>
+    <div class="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent">
+    </div>
   </div>
 
-  <%!-- Floating nodes decoration --%>
-  <div class="absolute inset-0 overflow-hidden pointer-events-none">
-    <%!-- Node 1 - GPT-4 --%>
-    <div class="card card-border card-xs absolute top-[15%] left-[10%] w-32 bg-base-100/80 shadow-lg shadow-primary/10 animate-pulse">
-      <div class="card-body p-2">
-        <h3 class="text-xs font-mono text-primary">GPT-5.2</h3>
-        <div class="flex gap-1">
-          <span class="status status-success"></span>
-          <span class="status status-warning"></span>
-        </div>
-      </div>
+  <%!-- Top navigation --%>
+  <nav class="relative z-10 flex items-center justify-between px-6 sm:px-10 lg:px-16 py-6">
+    <span class="font-mono text-[11px] tracking-[0.2em] uppercase text-base-content/70">
+      Playground
+    </span>
+    <div class="flex items-center gap-6">
+      <%= if @current_scope && @current_scope.user do %>
+        <span class="font-mono text-xs text-base-content/70 truncate max-w-[160px]">
+          {@current_scope.user["email"]}
+        </span>
+        <a
+          href="/sign-out"
+          class="font-mono text-xs text-base-content/70 hover:text-error transition-colors duration-300"
+        >
+          Sign out
+        </a>
+      <% else %>
+        <a
+          href="/sign-in"
+          class="font-mono text-xs text-base-content/70 hover:text-primary transition-colors duration-300"
+        >
+          Sign in <span class="text-primary/70">→</span>
+        </a>
+      <% end %>
     </div>
+  </nav>
 
-    <%!-- Connection line 1 --%>
-    <svg class="absolute top-[20%] left-[18%] w-48 h-32 opacity-60">
-      <path
-        d="M 0 20 Q 80 20 96 60 T 192 80"
-        stroke="url(#gradient1)"
-        stroke-width="2"
-        fill="none"
-        stroke-dasharray="8 4"
-      >
-        <animate
-          attributeName="stroke-dashoffset"
-          from="0"
-          to="-24"
-          dur="1.5s"
-          repeatCount="indefinite"
+  <%!-- Beta banner --%>
+  <div class="relative z-10 px-6 sm:px-10 lg:px-16" id="beta-banner">
+    <a
+      href="mailto:playground@sgiath.dev?subject=Beta%20access%20request"
+      class={[
+        "group relative flex items-center justify-between gap-4 px-5 py-3.5 rounded-lg overflow-hidden",
+        "border border-secondary/25 bg-secondary/[0.08]",
+        "shadow-md shadow-secondary/[0.06]",
+        "transition-all duration-300",
+        "hover:border-secondary/40 hover:bg-secondary/[0.12]",
+        "hover:shadow-lg hover:shadow-secondary/[0.12]"
+      ]}
+    >
+      <%!-- Glow accent --%>
+      <div class="pointer-events-none absolute -left-10 -top-10 w-40 h-40 rounded-full bg-secondary/[0.08] blur-[60px]">
+      </div>
+      <div class="relative flex items-center gap-3 min-w-0">
+        <span class="flex items-center gap-2 shrink-0">
+          <span class="relative flex h-2 w-2">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary opacity-60">
+            </span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-secondary"></span>
+          </span>
+          <span class="font-mono text-[11px] tracking-[0.15em] uppercase text-secondary font-semibold">
+            Beta
+          </span>
+        </span>
+        <span class="hidden sm:inline h-3.5 w-px bg-secondary/20"></span>
+        <span class="text-sm text-base-content/90 truncate">
+          Closed beta — request an invite
+        </span>
+      </div>
+      <span class="relative flex items-center gap-2 shrink-0">
+        <.icon
+          name="hero-envelope"
+          class="w-3.5 h-3.5 text-secondary/60 group-hover:text-secondary transition-colors duration-300"
         />
-      </path>
-      <defs>
-        <linearGradient id="gradient1" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" class="[stop-color:oklch(var(--color-primary))]" />
-          <stop offset="100%" class="[stop-color:oklch(var(--color-accent))]" />
-        </linearGradient>
-      </defs>
-    </svg>
-
-    <%!-- Node 2 - Prompt Template --%>
-    <div class="card card-border card-xs absolute top-[25%] left-[30%] w-36 bg-base-100/80 shadow-lg shadow-accent/10">
-      <div class="card-body p-2">
-        <h3 class="text-xs font-mono text-accent">Prompt Template</h3>
-        <code class="text-[10px] text-base-content/60">{"{{context}}"}</code>
-      </div>
-    </div>
-
-    <%!-- Node 3 - Output --%>
-    <div class="card card-border card-xs absolute top-[10%] right-[15%] w-28 bg-base-100/80 shadow-lg shadow-success/10 animate-pulse [animation-delay:0.5s]">
-      <div class="card-body p-2">
-        <h3 class="text-xs font-mono text-success">Output</h3>
-        <span class="status status-success animate-ping"></span>
-      </div>
-    </div>
-
-    <%!-- Node 4 - Claude --%>
-    <div class="card card-border card-xs absolute bottom-[30%] left-[8%] w-32 bg-base-100/80 shadow-lg shadow-info/10">
-      <div class="card-body p-2">
-        <h3 class="text-xs font-mono text-info">Claude</h3>
-        <div class="flex gap-1">
-          <span class="status status-info"></span>
-          <span class="status status-warning"></span>
-        </div>
-      </div>
-    </div>
-
-    <%!-- Node 5 - Chain Router --%>
-    <div class="card card-border card-xs absolute bottom-[20%] right-[10%] w-36 bg-base-100/80 shadow-lg shadow-warning/10">
-      <div class="card-body p-2">
-        <h3 class="text-xs font-mono text-warning">Chain Router</h3>
-        <code class="text-[10px] text-base-content/60">if/else logic</code>
-      </div>
-    </div>
-
-    <%!-- Connection line 2 --%>
-    <svg class="absolute bottom-[25%] right-[25%] w-48 h-32 opacity-60">
-      <path
-        d="M 0 60 Q 60 60 96 30 T 192 10"
-        stroke="url(#gradient2)"
-        stroke-width="2"
-        fill="none"
-        stroke-dasharray="8 4"
-      >
-        <animate
-          attributeName="stroke-dashoffset"
-          from="0"
-          to="24"
-          dur="2s"
-          repeatCount="indefinite"
+        <span class="hidden sm:inline font-mono text-xs text-secondary/70 group-hover:text-secondary transition-colors duration-300">
+          playground@sgiath.dev
+        </span>
+        <.icon
+          name="hero-arrow-up-right"
+          class="w-3 h-3 text-secondary/50 group-hover:text-secondary transition-all duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
         />
-      </path>
-      <defs>
-        <linearGradient id="gradient2" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" class="[stop-color:oklch(var(--color-warning))]" />
-          <stop offset="100%" class="[stop-color:oklch(var(--color-success))]" />
-        </linearGradient>
-      </defs>
-    </svg>
+      </span>
+    </a>
   </div>
 
-  <%!-- Hero content --%>
-  <div class="hero-content text-center z-10 py-24">
-    <div class="max-w-4xl">
-      <%!-- Badge --%>
-      <div class="badge badge-primary badge-soft badge-lg gap-2 mb-8">
-        <span class="status status-primary animate-pulse"></span> Now in Beta — Try it free
+  <%!-- Hero --%>
+  <section class="relative z-10 flex-1 flex flex-col justify-center px-6 sm:px-10 lg:px-16 py-16 min-h-[70vh]">
+    <div class="max-w-5xl">
+      <%!-- Status indicator --%>
+      <div class="home-reveal flex items-center gap-3 mb-14">
+        <span class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75">
+          </span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-success"></span>
+        </span>
+        <span class="font-mono text-[11px] tracking-[0.15em] uppercase text-base-content/60">
+          Online
+        </span>
       </div>
 
-      <%!-- Main heading --%>
-      <h1 class="text-5xl sm:text-6xl lg:text-7xl font-black tracking-tight mb-6">
-        Build LLM chains
-        <span class="block mt-2 bg-gradient-to-r from-primary via-accent to-info bg-clip-text text-transparent">
-          visually.
+      <%!-- Headline --%>
+      <h1 class="home-reveal [animation-delay:0.1s] select-none">
+        <span class="block text-[clamp(3.5rem,12vw,9rem)] font-black tracking-[-0.04em] leading-[0.85]">
+          Play
+        </span>
+        <span class="block text-[clamp(3.5rem,12vw,9rem)] font-black tracking-[-0.04em] leading-[0.85] text-primary">
+          ground<span class="home-cursor font-extralight text-base-content/50 ml-0.5">_</span>
         </span>
       </h1>
 
-      <%!-- Subheading --%>
-      <p class="text-lg sm:text-xl text-base-content/70 max-w-2xl mx-auto mb-10 leading-relaxed">
-        Design, test, and iterate on complex AI workflows with our intuitive node-based editor.
-        Connect models, prompts, and logic — no code required.
+      <%!-- Tagline --%>
+      <p class="home-reveal [animation-delay:0.2s] mt-10 max-w-md text-base sm:text-lg text-base-content/80 leading-relaxed">
+        An experimental workspace for building, testing, and conversing with AI agents.
       </p>
 
-      <%!-- CTA buttons --%>
-      <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
-        <a href={~p"/agent"} class="btn btn-primary btn-lg group">
-          Start Building
-          <.icon
-            name="hero-arrow-right"
-            class="w-5 h-5 transition-transform group-hover:translate-x-1"
-          />
-        </a>
-        <a href="#features" class="btn btn-ghost btn-lg">
-          <.icon name="hero-play-circle" class="w-5 h-5" /> Watch Demo
-        </a>
-      </div>
-
-      <%!-- Social proof --%>
-      <div class="divider my-12 text-base-content/50 text-sm">Trusted by AI teams at</div>
-      <div class="flex flex-wrap justify-center items-center gap-8 opacity-50">
-        <span class="text-xl font-bold tracking-tight">Acme</span>
-        <span class="text-xl font-bold tracking-tight">Nebula</span>
-        <span class="text-xl font-bold tracking-tight">Quantum</span>
-        <span class="text-xl font-bold tracking-tight">Vertex</span>
-        <span class="text-xl font-bold tracking-tight">Helix</span>
+      <%!-- Actions --%>
+      <div class="home-reveal [animation-delay:0.3s] flex flex-wrap items-center gap-4 mt-12">
+        <%= if @current_scope && @current_scope.user do %>
+          <a
+            href="/agent"
+            class={[
+              "group inline-flex items-center gap-2.5 px-7 py-3.5 rounded-lg",
+              "bg-primary text-primary-content font-medium text-sm",
+              "transition-all duration-300",
+              "hover:shadow-lg hover:shadow-primary/25 hover:brightness-110"
+            ]}
+          >
+            Open workspace
+            <.icon
+              name="hero-arrow-right"
+              class="w-4 h-4 transition-transform duration-300 group-hover:translate-x-0.5"
+            />
+          </a>
+          <a
+            href="/conv"
+            class={[
+              "inline-flex items-center gap-2 px-6 py-3.5 rounded-lg",
+              "text-sm font-medium text-base-content/80",
+              "transition-all duration-300",
+              "hover:text-base-content hover:bg-base-content/[0.08]"
+            ]}
+          >
+            Conversations
+          </a>
+        <% else %>
+          <a
+            href="/sign-up"
+            class={[
+              "group inline-flex items-center gap-2.5 px-7 py-3.5 rounded-lg",
+              "bg-primary text-primary-content font-medium text-sm",
+              "transition-all duration-300",
+              "hover:shadow-lg hover:shadow-primary/25 hover:brightness-110"
+            ]}
+          >
+            Get started
+            <.icon
+              name="hero-arrow-right"
+              class="w-4 h-4 transition-transform duration-300 group-hover:translate-x-0.5"
+            />
+          </a>
+          <a
+            href="/agent"
+            class={[
+              "inline-flex items-center gap-2 px-6 py-3.5 rounded-lg",
+              "text-sm font-medium text-base-content/80",
+              "transition-all duration-300",
+              "hover:text-base-content hover:bg-base-content/[0.08]"
+            ]}
+          >
+            Explore agents
+          </a>
+        <% end %>
       </div>
     </div>
-  </div>
 
-  <%!-- Scroll indicator --%>
-  <div class="absolute bottom-8 left-1/2 -translate-x-1/2 animate-bounce">
-    <.icon name="hero-chevron-down" class="w-6 h-6 text-base-content/40" />
-  </div>
+    <%!-- Decorative vertical rule --%>
+    <div class="hidden lg:block absolute right-16 top-1/2 -translate-y-1/2 h-40 w-px bg-gradient-to-b from-transparent via-base-content/[0.10] to-transparent">
+    </div>
+  </section>
+
+  <%!-- Modules --%>
+  <section class="relative z-10 px-6 sm:px-10 lg:px-16 pb-24">
+    <%!-- Section divider --%>
+    <div class="home-reveal [animation-delay:0.4s] flex items-center gap-5 mb-10">
+      <span class="font-mono text-[11px] tracking-[0.2em] uppercase text-base-content/60">
+        Modules
+      </span>
+      <div class="flex-1 h-px bg-base-content/[0.12]"></div>
+    </div>
+
+    <%!-- Cards --%>
+    <div class="home-reveal [animation-delay:0.5s] grid sm:grid-cols-2 gap-5 max-w-3xl">
+      <%!-- Agents card --%>
+      <a href="/agent" class="group block" id="home-agents-card">
+        <div class={[
+          "h-full p-7 rounded-xl",
+          "border border-base-content/[0.12] bg-base-200/60",
+          "transition-all duration-300",
+          "hover:border-primary/30 hover:bg-base-200/80",
+          "hover:shadow-xl hover:shadow-primary/[0.04]"
+        ]}>
+          <div class="flex items-start justify-between mb-8">
+            <div class="p-2.5 rounded-lg bg-primary/10 ring-1 ring-primary/[0.08]">
+              <.icon name="hero-cpu-chip" class="w-5 h-5 text-primary" />
+            </div>
+            <.icon
+              name="hero-arrow-up-right"
+              class="w-4 h-4 text-base-content/40 group-hover:text-primary/70 transition-colors duration-300"
+            />
+          </div>
+          <h3 class="text-lg font-semibold mb-2.5 group-hover:text-primary transition-colors duration-300">
+            Agents
+          </h3>
+          <p class="text-[13px] text-base-content/75 leading-relaxed">
+            Configure and deploy autonomous AI agents with custom tools, system prompts,
+            and model parameters.
+          </p>
+          <div class="mt-7 font-mono text-[11px] text-base-content/45 group-hover:text-primary/70 transition-colors duration-300">
+            /agent
+          </div>
+        </div>
+      </a>
+
+      <%!-- Conversations card --%>
+      <a href="/conv" class="group block" id="home-conv-card">
+        <div class={[
+          "h-full p-7 rounded-xl",
+          "border border-base-content/[0.12] bg-base-200/60",
+          "transition-all duration-300",
+          "hover:border-info/30 hover:bg-base-200/80",
+          "hover:shadow-xl hover:shadow-info/[0.04]"
+        ]}>
+          <div class="flex items-start justify-between mb-8">
+            <div class="p-2.5 rounded-lg bg-info/10 ring-1 ring-info/[0.08]">
+              <.icon name="hero-chat-bubble-left-right" class="w-5 h-5 text-info" />
+            </div>
+            <.icon
+              name="hero-arrow-up-right"
+              class="w-4 h-4 text-base-content/40 group-hover:text-info/70 transition-colors duration-300"
+            />
+          </div>
+          <h3 class="text-lg font-semibold mb-2.5 group-hover:text-info transition-colors duration-300">
+            Conversations
+          </h3>
+          <p class="text-[13px] text-base-content/75 leading-relaxed">
+            Multi-turn conversations with streaming responses, rich markdown rendering,
+            and full message history.
+          </p>
+          <div class="mt-7 font-mono text-[11px] text-base-content/45 group-hover:text-info/70 transition-colors duration-300">
+            /conv
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <%!-- Footer --%>
+  <footer class="relative z-10 px-6 sm:px-10 lg:px-16 py-6 mt-auto">
+    <div class="flex items-center justify-between border-t border-base-content/[0.12] pt-6">
+      <span class="font-mono text-[10px] tracking-wider text-base-content/50">
+        © {Date.utc_today().year}
+      </span>
+      <a
+        href="https://sgiath.dev"
+        target="_blank"
+        rel="noopener"
+        class="font-mono text-[10px] tracking-wider text-base-content/50 hover:text-base-content/80 transition-colors duration-300"
+      >
+        sgiath.dev
+      </a>
+    </div>
+  </footer>
 </div>
-
-<%!-- Features Section --%>
-<section id="features" class="py-24 bg-base-100">
-  <div class="max-w-7xl mx-auto px-6">
-    <%!-- Section header --%>
-    <div class="text-center mb-16">
-      <h2 class="text-3xl sm:text-4xl font-bold mb-4">
-        Everything you need to build AI workflows
-      </h2>
-      <p class="text-lg text-base-content/60 max-w-2xl mx-auto">
-        Our visual editor gives you the power of code with the simplicity of drag-and-drop.
-      </p>
-    </div>
-
-    <%!-- Feature grid using cards --%>
-    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <%!-- Feature 1 --%>
-      <div class="card bg-base-200/50 card-border hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-1 transition-all duration-300">
-        <div class="card-body">
-          <div class="avatar placeholder mb-2">
-            <div class="bg-primary/10 text-primary w-12 rounded-lg">
-              <.icon name="hero-squares-plus" class="w-6 h-6" />
-            </div>
-          </div>
-          <h3 class="card-title text-lg">Visual Node Editor</h3>
-          <p class="text-base-content/60 text-sm">
-            Drag, drop, and connect nodes to build complex LLM chains. See your entire workflow at a glance.
-          </p>
-        </div>
-      </div>
-
-      <%!-- Feature 2 --%>
-      <div class="card bg-base-200/50 card-border hover:shadow-lg hover:shadow-accent/5 hover:-translate-y-1 transition-all duration-300">
-        <div class="card-body">
-          <div class="avatar placeholder mb-2">
-            <div class="bg-accent/10 text-accent w-12 rounded-lg">
-              <.icon name="hero-bolt" class="w-6 h-6" />
-            </div>
-          </div>
-          <h3 class="card-title text-lg">Real-time Testing</h3>
-          <p class="text-base-content/60 text-sm">
-            Test your chains instantly with live execution. Debug step-by-step and see intermediate outputs.
-          </p>
-        </div>
-      </div>
-
-      <%!-- Feature 3 --%>
-      <div class="card bg-base-200/50 card-border hover:shadow-lg hover:shadow-info/5 hover:-translate-y-1 transition-all duration-300">
-        <div class="card-body">
-          <div class="avatar placeholder mb-2">
-            <div class="bg-info/10 text-info w-12 rounded-lg">
-              <.icon name="hero-cpu-chip" class="w-6 h-6" />
-            </div>
-          </div>
-          <h3 class="card-title text-lg">Multi-Model Support</h3>
-          <p class="text-base-content/60 text-sm">
-            Connect to GPT-4, Claude, Llama, Mistral, and more. Switch models with a click.
-          </p>
-        </div>
-      </div>
-
-      <%!-- Feature 4 --%>
-      <div class="card bg-base-200/50 card-border hover:shadow-lg hover:shadow-success/5 hover:-translate-y-1 transition-all duration-300">
-        <div class="card-body">
-          <div class="avatar placeholder mb-2">
-            <div class="bg-success/10 text-success w-12 rounded-lg">
-              <.icon name="hero-code-bracket" class="w-6 h-6" />
-            </div>
-          </div>
-          <h3 class="card-title text-lg">Export to Code</h3>
-          <p class="text-base-content/60 text-sm">
-            Export your visual workflows to clean, production-ready code in Python, TypeScript, or Elixir.
-          </p>
-        </div>
-      </div>
-
-      <%!-- Feature 5 --%>
-      <div class="card bg-base-200/50 card-border hover:shadow-lg hover:shadow-warning/5 hover:-translate-y-1 transition-all duration-300">
-        <div class="card-body">
-          <div class="avatar placeholder mb-2">
-            <div class="bg-warning/10 text-warning w-12 rounded-lg">
-              <.icon name="hero-arrow-path" class="w-6 h-6" />
-            </div>
-          </div>
-          <h3 class="card-title text-lg">Version Control</h3>
-          <p class="text-base-content/60 text-sm">
-            Track changes, compare versions, and roll back anytime. Collaborate with your team seamlessly.
-          </p>
-        </div>
-      </div>
-
-      <%!-- Feature 6 --%>
-      <div class="card bg-base-200/50 card-border hover:shadow-lg hover:shadow-error/5 hover:-translate-y-1 transition-all duration-300">
-        <div class="card-body">
-          <div class="avatar placeholder mb-2">
-            <div class="bg-error/10 text-error w-12 rounded-lg">
-              <.icon name="hero-chart-bar" class="w-6 h-6" />
-            </div>
-          </div>
-          <h3 class="card-title text-lg">Analytics & Monitoring</h3>
-          <p class="text-base-content/60 text-sm">
-            Track token usage, latency, and costs. Get insights to optimize your AI workflows.
-          </p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<%!-- How it works section using steps --%>
-<section class="py-24 bg-base-200/50">
-  <div class="max-w-5xl mx-auto px-6">
-    <div class="text-center mb-16">
-      <h2 class="text-3xl sm:text-4xl font-bold mb-4">
-        How it works
-      </h2>
-      <p class="text-lg text-base-content/60 max-w-2xl mx-auto">
-        Go from idea to working AI chain in minutes, not days.
-      </p>
-    </div>
-
-    <%!-- Steps component --%>
-    <ul class="steps steps-vertical lg:steps-horizontal w-full">
-      <li class="step step-primary" data-content="1">
-        <div class="text-left lg:text-center mt-4 lg:mt-0 lg:pt-8">
-          <h3 class="text-xl font-semibold mb-2">Design Your Chain</h3>
-          <p class="text-base-content/60 text-sm max-w-xs">
-            Drag nodes onto the canvas and connect them to define your workflow's logic and data flow.
-          </p>
-        </div>
-      </li>
-      <li class="step step-primary" data-content="2">
-        <div class="text-left lg:text-center mt-4 lg:mt-0 lg:pt-8">
-          <h3 class="text-xl font-semibold mb-2">Test & Iterate</h3>
-          <p class="text-base-content/60 text-sm max-w-xs">
-            Run your chain with test inputs, see results in real-time, and refine until perfect.
-          </p>
-        </div>
-      </li>
-      <li class="step step-primary" data-content="3">
-        <div class="text-left lg:text-center mt-4 lg:mt-0 lg:pt-8">
-          <h3 class="text-xl font-semibold mb-2">Deploy & Monitor</h3>
-          <p class="text-base-content/60 text-sm max-w-xs">
-            Export to code or deploy directly via API. Monitor performance and costs in production.
-          </p>
-        </div>
-      </li>
-    </ul>
-  </div>
-</section>
-
-<%!-- CTA Section --%>
-<section class="hero py-24 bg-gradient-to-br from-primary/10 via-base-100 to-accent/10 relative overflow-hidden">
-  <%!-- Background decoration --%>
-  <div class="absolute inset-0 opacity-30 pointer-events-none">
-    <div class="absolute top-1/4 left-1/4 w-64 h-64 bg-primary/20 rounded-full blur-3xl"></div>
-    <div class="absolute bottom-1/4 right-1/4 w-64 h-64 bg-accent/20 rounded-full blur-3xl"></div>
-  </div>
-
-  <div class="hero-content text-center z-10">
-    <div class="max-w-2xl">
-      <h2 class="text-3xl sm:text-4xl lg:text-5xl font-bold mb-6">
-        Ready to build smarter AI workflows?
-      </h2>
-      <p class="text-lg text-base-content/70 mb-10">
-        Join thousands of developers and teams using our visual editor to prototype and ship AI features faster.
-      </p>
-      <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
-        <a href="/editor" class="btn btn-primary btn-lg group">
-          Get Started Free
-          <.icon
-            name="hero-arrow-right"
-            class="w-5 h-5 transition-transform group-hover:translate-x-1"
-          />
-        </a>
-        <a href="/pricing" class="btn btn-outline btn-lg">
-          View Pricing
-        </a>
-      </div>
-    </div>
-  </div>
-</section>
-
-<%!-- Footer using DaisyUI footer component --%>
-<footer class="footer footer-horizontal bg-base-300 text-base-content p-10">
-  <aside class="grid-flow-col items-center">
-    <div class="avatar placeholder">
-      <div class="bg-gradient-to-br from-primary to-accent text-primary-content w-10 rounded-lg">
-        <.icon name="hero-squares-plus" class="w-6 h-6" />
-      </div>
-    </div>
-    <p class="font-bold text-lg">
-      ChainForge <br />
-      <span class="text-sm font-normal text-base-content/60">Built with Phoenix Framework</span>
-    </p>
-  </aside>
-  <nav>
-    <a class="link link-hover">Documentation</a>
-    <a class="link link-hover">Pricing</a>
-    <a class="link link-hover">Blog</a>
-    <a class="link link-hover">Support</a>
-  </nav>
-  <nav>
-    <Layouts.theme_toggle />
-  </nav>
-</footer>
-<footer class="footer footer-center bg-base-300 text-base-content/50 p-4 border-t border-base-content/10">
-  <aside>
-    <p>© {Date.utc_today().year} ChainForge. All rights reserved.</p>
-  </aside>
-</footer>
