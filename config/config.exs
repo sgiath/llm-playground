@@ -16,8 +16,8 @@ config :play, PlayWeb.Endpoint,
   live_view: [signing_salt: "Bwi+HoZQ"]
 
 config :sgiath_auth,
-  organization_id: "org_01KDQGBGV0CQKH8JJR94TDYKKG",
-  profile_module: Play.UserProfile
+  profile_module: Play.UserProfile,
+  no_organization_redirect: "/"
 
 # JWKS uses Tesla so we need to set the adapter
 config :tesla, adapter: Tesla.Adapter.Mint

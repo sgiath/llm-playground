@@ -124,16 +124,32 @@
   }
 
   /* Headings */
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-weight: 600;
     margin-top: 1em;
     margin-bottom: 0.5em;
   }
-  h1 { font-size: 1.5em; }
-  h2 { font-size: 1.3em; }
-  h3 { font-size: 1.15em; }
-  h4 { font-size: 1.05em; }
-  h5, h6 { font-size: 1em; }
+  h1 {
+    font-size: 1.5em;
+  }
+  h2 {
+    font-size: 1.3em;
+  }
+  h3 {
+    font-size: 1.15em;
+  }
+  h4 {
+    font-size: 1.05em;
+  }
+  h5,
+  h6 {
+    font-size: 1em;
+  }
 
   /* Code blocks */
   pre {
@@ -164,7 +180,8 @@
   }
 
   /* Lists */
-  ul, ol {
+  ul,
+  ol {
     margin-top: 0.5em;
     margin-bottom: 0.5em;
     padding-left: 1.5em;
@@ -179,10 +196,12 @@
     margin-top: 0.25em;
     margin-bottom: 0.25em;
   }
-  ul ul, ol ul {
+  ul ul,
+  ol ul {
     list-style-type: circle;
   }
-  ul ul ul, ol ul ul {
+  ul ul ul,
+  ol ul ul {
     list-style-type: square;
   }
 
@@ -205,7 +224,8 @@
     margin-bottom: 0.75em;
     font-size: 0.875em;
   }
-  th, td {
+  th,
+  td {
     border: 1px solid oklch(40% 0.02 250);
     padding: 0.5rem 0.75rem;
     text-align: left;

@@ -46,20 +46,20 @@ const LitegraphHook = {
     LiteGraph.NODE_TITLE_COLOR = "#ffffff";
     LiteGraph.NODE_SELECTED_TITLE_COLOR = "#ffffff";
     LiteGraph.NODE_TEXT_COLOR = "#e0e0e0";
-    
+
     // Modern widget styling - bigger widgets with more space
-    LiteGraph.NODE_WIDGET_HEIGHT = 28;  // Increased from 20
-    LiteGraph.NODE_SLOT_HEIGHT = 24;    // Slightly taller slots
-    LiteGraph.NODE_TITLE_HEIGHT = 34;   // Slightly taller title
-    LiteGraph.NODE_TEXT_SIZE = 14;      // Readable text size
-    
+    LiteGraph.NODE_WIDGET_HEIGHT = 28; // Increased from 20
+    LiteGraph.NODE_SLOT_HEIGHT = 24; // Slightly taller slots
+    LiteGraph.NODE_TITLE_HEIGHT = 34; // Slightly taller title
+    LiteGraph.NODE_TEXT_SIZE = 14; // Readable text size
+
     // Modern widget colors - cleaner, more contrast
-    LiteGraph.WIDGET_BGCOLOR = "#1a1a2e";        // Darker, slightly blue-tinted
-    LiteGraph.WIDGET_OUTLINE_COLOR = "#4a4a6a";  // Softer outline
-    LiteGraph.WIDGET_TEXT_COLOR = "#f0f0f0";     // Brighter text
-    LiteGraph.WIDGET_SECONDARY_TEXT_COLOR = "#a0a0b0";  // Softer secondary text
-    LiteGraph.WIDGET_MARGIN = 10;                // Widget side margin
-    
+    LiteGraph.WIDGET_BGCOLOR = "#1a1a2e"; // Darker, slightly blue-tinted
+    LiteGraph.WIDGET_OUTLINE_COLOR = "#4a4a6a"; // Softer outline
+    LiteGraph.WIDGET_TEXT_COLOR = "#f0f0f0"; // Brighter text
+    LiteGraph.WIDGET_SECONDARY_TEXT_COLOR = "#a0a0b0"; // Softer secondary text
+    LiteGraph.WIDGET_MARGIN = 10; // Widget side margin
+
     // Node colors - modern dark theme
     LiteGraph.NODE_DEFAULT_COLOR = "#2d2d44";
     LiteGraph.NODE_DEFAULT_BGCOLOR = "#1e1e2e";
@@ -96,20 +96,20 @@ const LitegraphHook = {
   // Override LiteGraph's prompt function to use LiveView modal instead
   setupPromptOverride() {
     const hook = this;
-    
+
     // Store reference to the original prompt method
     const originalPrompt = LGraphCanvas.prototype.prompt;
-    
+
     // Storage for pending prompt callback
     this.pendingPromptCallback = null;
     this.pendingPromptWidget = null;
-    
+
     // Override the prompt method
-    LGraphCanvas.prototype.prompt = function(title, value, callback, event, multiline) {
+    LGraphCanvas.prototype.prompt = function (title, value, callback, event, multiline) {
       // Find the node and widget that triggered this prompt
       let nodeId = null;
       let widgetName = title;
-      
+
       // Try multiple sources to find the node - node_widget is set too late, try node_over
       if (this.node_widget && this.node_widget[0]) {
         nodeId = this.node_widget[0].id;
@@ -121,23 +121,25 @@ const LitegraphHook = {
         nodeId = this.node_over.id;
         // Try to find the widget by matching the value
         if (this.node_over.widgets) {
-          const widget = this.node_over.widgets.find(w => w.value === value || w.name === title);
+          const widget = this.node_over.widgets.find(
+            (w) => w.value === value || w.name === title,
+          );
           if (widget) {
             widgetName = widget.name || title;
           }
         }
       }
-      
+
       // If we have a valid node, use LiveView modal
       if (nodeId !== null) {
         // Store the callback and widget for later
         hook.pendingPromptCallback = callback;
         hook.pendingPromptWidget = this.node_widget ? this.node_widget[1] : null;
-        
+
         // Get the node for additional context
         const node = hook.graph.getNodeById(nodeId);
         const nodeType = node ? node.type : null;
-        
+
         // Gather input connection info for prompt_template nodes
         let inputConnections = null;
         if (node && nodeType === "utility/prompt_template") {
@@ -149,9 +151,9 @@ const LitegraphHook = {
                 name: input.name,
                 connected: input.link !== null,
                 source_node: null,
-                source_title: null
+                source_title: null,
               };
-              
+
               // If connected, find the source node
               if (input.link !== null) {
                 const link = hook.graph.links[input.link];
@@ -159,16 +161,16 @@ const LitegraphHook = {
                   const sourceNode = hook.graph.getNodeById(link.origin_id);
                   if (sourceNode) {
                     connInfo.source_node = sourceNode.id;
-                    connInfo.source_title = sourceNode.title || sourceNode.type.split('/').pop();
+                    connInfo.source_title = sourceNode.title || sourceNode.type.split("/").pop();
                   }
                 }
               }
-              
+
               inputConnections.push(connInfo);
             });
           }
         }
-        
+
         // Push event to LiveView to show modal
         hook.pushEvent("show_text_widget_modal", {
           node_id: nodeId,
@@ -177,29 +179,29 @@ const LitegraphHook = {
           multiline: multiline || false,
           title: title,
           node_type: nodeType,
-          input_connections: inputConnections
+          input_connections: inputConnections,
         });
       } else {
         // Fallback to original prompt if we can't determine the node
         originalPrompt.call(this, title, value, callback, event, multiline);
       }
     };
-    
+
     // Handle the saved value from LiveView modal
     this.handleEvent("text_widget_value_saved", (payload) => {
       const { node_id, widget_name, value } = payload;
-      
+
       // Call the stored callback with the new value
       if (hook.pendingPromptCallback) {
         hook.pendingPromptCallback(value);
         hook.pendingPromptCallback = null;
         hook.pendingPromptWidget = null;
       }
-      
+
       // Also update the node property directly to ensure sync
       const node = hook.graph.getNodeById(node_id);
       if (node && node.widgets) {
-        const widget = node.widgets.find(w => w.name === widget_name);
+        const widget = node.widgets.find((w) => w.name === widget_name);
         if (widget) {
           widget.value = value;
           if (widget.property) {
@@ -207,11 +209,11 @@ const LitegraphHook = {
           }
         }
       }
-      
+
       // Redraw the canvas
       hook.graphCanvas.setDirty(true, true);
     });
-    
+
     // Handle modal cancel - just clear the pending callback
     this.handleEvent("text_widget_modal_cancelled", () => {
       hook.pendingPromptCallback = null;
@@ -231,10 +233,7 @@ const LitegraphHook = {
       const { types } = payload;
       console.log(`Registering ${types.length} node types...`);
       types.forEach((def) => this.registerNodeTypeFromDefinition(def));
-      console.log(
-        "Registered node types:",
-        Object.keys(LiteGraph.registered_node_types)
-      );
+      console.log("Registered node types:", Object.keys(LiteGraph.registered_node_types));
     });
 
     // Add a node to the graph
@@ -281,9 +280,7 @@ const LitegraphHook = {
     // Use setTimeout to ensure node types are registered first
     this.handleEvent("load_graph", (payload) => {
       const { graph_data } = payload;
-      console.log(
-        `Loading graph with ${graph_data.nodes?.length || 0} nodes...`
-      );
+      console.log(`Loading graph with ${graph_data.nodes?.length || 0} nodes...`);
 
       // Store graph data to load after registration completes
       this.pendingGraphLoad = graph_data;
@@ -291,10 +288,7 @@ const LitegraphHook = {
       // Defer loading to allow node types registration to complete
       setTimeout(() => {
         if (this.pendingGraphLoad) {
-          console.log(
-            "Available node types:",
-            Object.keys(LiteGraph.registered_node_types)
-          );
+          console.log("Available node types:", Object.keys(LiteGraph.registered_node_types));
           try {
             // graph.configure override handles _graphLoading flag
             this.graph.configure(this.pendingGraphLoad);
@@ -303,11 +297,7 @@ const LitegraphHook = {
             this.graphCanvas.draw(true, true);
             // Also resize to ensure proper rendering
             this.resizeCanvas();
-            console.log(
-              "Graph loaded successfully with",
-              this.graph._nodes.length,
-              "nodes"
-            );
+            console.log("Graph loaded successfully with", this.graph._nodes.length, "nodes");
           } catch (e) {
             console.error("Error loading graph:", e);
           }
@@ -330,8 +320,7 @@ const LitegraphHook = {
           node.type === "storage/load_conversation" ||
           node.type === "storage/save_conversation"
         ) {
-          const values =
-            node.type === "storage/load_conversation" ? load_values : save_values;
+          const values = node.type === "storage/load_conversation" ? load_values : save_values;
           const propName = "conversation_id";
 
           // Update the combo mapping
@@ -339,7 +328,7 @@ const LitegraphHook = {
 
           // Find and update the widget
           const widget = node.widgets?.find(
-            (w) => w.name === "Conversation" || w.name === propName
+            (w) => w.name === "Conversation" || w.name === propName,
           );
           if (widget) {
             // Update widget options with labels
@@ -393,9 +382,7 @@ const LitegraphHook = {
           node.properties[key] = value;
           // Update widget if exists
           if (node.widgets) {
-            const widget = node.widgets.find(
-              (w) => w.property === key || w.name === key
-            );
+            const widget = node.widgets.find((w) => w.property === key || w.name === key);
             if (widget) widget.value = value;
           }
         });
@@ -502,11 +489,7 @@ const LitegraphHook = {
         }
 
         // Also update the node's own display if it's a Display node
-        if (
-          node.type === "output/display" &&
-          output !== null &&
-          output !== undefined
-        ) {
+        if (node.type === "output/display" && output !== null && output !== undefined) {
           node.properties.value = output;
         }
 
@@ -603,11 +586,9 @@ const LitegraphHook = {
     // Clear message input textareas
     this.handleEvent("clear_message_inputs", () => {
       // Find all message input textareas and clear them
-      document
-        .querySelectorAll('textarea[id^="message-input-"]')
-        .forEach((textarea) => {
-          textarea.value = "";
-        });
+      document.querySelectorAll('textarea[id^="message-input-"]').forEach((textarea) => {
+        textarea.value = "";
+      });
     });
   },
 
@@ -766,7 +747,7 @@ const LitegraphHook = {
               } else if (w.callback === "saveConversation") {
                 // Manual save conversation to database
                 const nodeId = this.id;
-                
+
                 // Check if conversation input (slot 1) is connected and has a value
                 let conversationId = this.properties.conversation_id || "__new__";
                 if (this.inputs && this.inputs[1] && this.inputs[1].link !== null) {
@@ -774,7 +755,11 @@ const LitegraphHook = {
                   const link = hook.graph.links[this.inputs[1].link];
                   if (link) {
                     const sourceNode = hook.graph.getNodeById(link.origin_id);
-                    if (sourceNode && sourceNode.outputs && sourceNode.outputs[link.origin_slot]) {
+                    if (
+                      sourceNode &&
+                      sourceNode.outputs &&
+                      sourceNode.outputs[link.origin_slot]
+                    ) {
                       const connectedValue = sourceNode.getOutputData(link.origin_slot);
                       if (connectedValue) {
                         conversationId = connectedValue;
@@ -782,7 +767,7 @@ const LitegraphHook = {
                     }
                   }
                 }
-                
+
                 const newName = this.properties.new_name || "New Conversation";
                 const mode = this.properties.mode || "override";
 
@@ -793,9 +778,7 @@ const LitegraphHook = {
                   new_name: newName,
                   mode: mode,
                 });
-                console.log(
-                  `Manual save conversation triggered for node ${nodeId}`
-                );
+                console.log(`Manual save conversation triggered for node ${nodeId}`);
               } else if (w.callback === "editConversation") {
                 // Navigate to conversation editor
                 const conversationId = this.properties.conversation_id;
@@ -806,13 +789,7 @@ const LitegraphHook = {
                 }
               }
             };
-            this.addWidget(
-              "button",
-              w.name,
-              null,
-              buttonCallback,
-              w.options || {}
-            );
+            this.addWidget("button", w.name, null, buttonCallback, w.options || {});
           } else {
             const callback = (v) => {
               // For combo widgets with value/label pairs, v is the label
@@ -820,11 +797,7 @@ const LitegraphHook = {
               let actualValue = v;
               if (w.type === "combo" && w.options && w.options.values) {
                 const values = w.options.values;
-                if (
-                  values.length > 0 &&
-                  typeof values[0] === "object" &&
-                  values[0].label
-                ) {
+                if (values.length > 0 && typeof values[0] === "object" && values[0].label) {
                   const found = values.find((opt) => opt.label === v);
                   if (found) {
                     actualValue = found.value;
@@ -847,11 +820,7 @@ const LitegraphHook = {
             let widgetOptions = w.options || {};
             if (w.type === "combo" && widgetOptions.values) {
               const values = widgetOptions.values;
-              if (
-                values.length > 0 &&
-                typeof values[0] === "object" &&
-                values[0].label
-              ) {
+              if (values.length > 0 && typeof values[0] === "object" && values[0].label) {
                 // Convert to array of labels for display
                 widgetOptions = {
                   ...widgetOptions,
@@ -866,11 +835,7 @@ const LitegraphHook = {
             let defaultValue = w.default;
             if (w.type === "combo" && w.options && w.options.values) {
               const values = w.options.values;
-              if (
-                values.length > 0 &&
-                typeof values[0] === "object" &&
-                values[0].label
-              ) {
+              if (values.length > 0 && typeof values[0] === "object" && values[0].label) {
                 const found = values.find((opt) => opt.value === w.default);
                 if (found) {
                   defaultValue = found.label;
@@ -880,13 +845,7 @@ const LitegraphHook = {
               }
             }
 
-            this.addWidget(
-              w.type,
-              w.name,
-              defaultValue,
-              callback,
-              widgetOptions
-            );
+            this.addWidget(w.type, w.name, defaultValue, callback, widgetOptions);
           }
         });
       }
@@ -996,7 +955,7 @@ const LitegraphHook = {
         slotIndex,
         isConnected,
         link,
-        ioSlot
+        ioSlot,
       ) {
         const config = this._dynamic_inputs;
         if (!config || !config.auto_add) return;
@@ -1065,9 +1024,7 @@ const LitegraphHook = {
 
       for (const [inputName, widgetNames] of Object.entries(mapping)) {
         // Find the input slot index by name
-        const inputIndex = node.inputs.findIndex(
-          (inp) => inp.name === inputName
-        );
+        const inputIndex = node.inputs.findIndex((inp) => inp.name === inputName);
         if (inputIndex === -1) continue;
 
         // Check if this input has a connection
@@ -1098,10 +1055,7 @@ const LitegraphHook = {
             const stored = node._removed_widgets[widgetName];
             if (stored && stored.widget) {
               // Insert at original position or at end
-              const insertIndex = Math.min(
-                stored.index,
-                node.widgets ? node.widgets.length : 0
-              );
+              const insertIndex = Math.min(stored.index, node.widgets ? node.widgets.length : 0);
               if (!node.widgets) node.widgets = [];
               node.widgets.splice(insertIndex, 0, stored.widget);
               delete node._removed_widgets[widgetName];
@@ -1122,17 +1076,24 @@ const LitegraphHook = {
     // Must combine with existing dynamic_inputs handler if both are present
     if (hide_widget_on_input) {
       const existingConnectionsChange = DynamicNode.prototype.onConnectionsChange;
-      
+
       DynamicNode.prototype.onConnectionsChange = function (
         connectionType,
         slotIndex,
         isConnected,
         link,
-        ioSlot
+        ioSlot,
       ) {
         // Call existing handler first (for dynamic_inputs auto-add)
         if (existingConnectionsChange) {
-          existingConnectionsChange.call(this, connectionType, slotIndex, isConnected, link, ioSlot);
+          existingConnectionsChange.call(
+            this,
+            connectionType,
+            slotIndex,
+            isConnected,
+            link,
+            ioSlot,
+          );
         }
         // Then update widget visibility
         updateWidgetVisibility(this);
@@ -1191,8 +1152,7 @@ const LitegraphHook = {
         ctx.fillStyle = display_value.color || "#FFF";
         ctx.textAlign = "left";
 
-        const displayText =
-          typeof value === "number" ? value.toFixed(2) : String(value ?? "");
+        const displayText = typeof value === "number" ? value.toFixed(2) : String(value ?? "");
 
         // Calculate available width (with padding)
         const padding = 10;
@@ -1240,10 +1200,7 @@ const LitegraphHook = {
         const titleHeight = 30;
         const inputHeight = this.inputs ? this.inputs.length * 20 : 0;
         const contentHeight = lines.length * lineHeight;
-        const minHeight = Math.max(
-          80,
-          titleHeight + inputHeight + contentHeight + padding * 2
-        );
+        const minHeight = Math.max(80, titleHeight + inputHeight + contentHeight + padding * 2);
 
         // Resize node if needed
         if (Math.abs(this.size[1] - minHeight) > 5) {
@@ -1294,13 +1251,7 @@ const LitegraphHook = {
     };
 
     // Connection change (link added or removed)
-    this.graph.onNodeConnectionChange = (
-      changeType,
-      node,
-      slot,
-      targetNode,
-      targetSlot
-    ) => {
+    this.graph.onNodeConnectionChange = (changeType, node, slot, targetNode, targetSlot) => {
       // changeType: LiteGraph.INPUT (1) or LiteGraph.OUTPUT (2)
       hook.pushEvent("connection_changed", {
         change_type: changeType === 1 ? "input" : "output",
@@ -1400,19 +1351,10 @@ const LitegraphHook = {
     };
 
     // Track property changes via widget interaction
-    this.graphCanvas.onWidgetChanged = (
-      name,
-      value,
-      oldValue,
-      widget,
-      node
-    ) => {
+    this.graphCanvas.onWidgetChanged = (name, value, oldValue, widget, node) => {
       // If this node was in completed or executing state, reset its color
       // This indicates that the new config hasn't been tested yet
-      if (
-        hook.completedNodes.has(node.id) ||
-        hook.executingNodes.has(node.id)
-      ) {
+      if (hook.completedNodes.has(node.id) || hook.executingNodes.has(node.id)) {
         const original = hook.originalColors.get(node.id);
         if (original) {
           node.color = original.color;
