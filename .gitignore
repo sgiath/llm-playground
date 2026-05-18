@@ -39,3 +39,5 @@ npm-debug.log
 /,elixir-tools/
 .env
 /.cursor/debug.log
+.fusion
+.pi

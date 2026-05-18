@@ -37,10 +37,10 @@ defmodule Play.MixProject do
 
       # Using fork with SSE comment fix for OpenRouter compatibility
       # See: https://github.com/brainlid/langchain/issues/259
-      {:langchain, github: "sgiath/langchain"},
+      {:langchain, github: "sgiath/langchain", ref: "024fe316cf6d1987120c213ae13e71031dc76200"},
 
       # phoenix
-      {:bandit, "~> 1.10"},
+      {:bandit, "~> 1.11"},
       {:phoenix, "~> 1.8"},
       {:phoenix_html, "~> 4.3"},
       {:phoenix_live_reload, "~> 1.6", only: :dev},
@@ -64,10 +64,10 @@ defmodule Play.MixProject do
        depth: 1},
 
       # other
-      {:swoosh, "~> 1.20"},
+      {:swoosh, "~> 1.25"},
       {:req, "~> 0.5"},
       {:gettext, "~> 1.0"},
-      {:mdex, "~> 0.10"},
+      {:mdex, "~> 0.12"},
 
       # deployment
       {:telemetry_metrics, "~> 1.1"},
